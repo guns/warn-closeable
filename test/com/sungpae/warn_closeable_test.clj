@@ -74,7 +74,7 @@
        (:require [clojure.java.io :as io]))
      (defn foo [input output]
        (let [rd (io/reader input)
-             _ :nothing
+             v :do-something
              wr (io/writer output)]
          (io/copy rd wr)))"
     [{:ns 'example
@@ -85,3 +85,42 @@
       :line 4
       :form '[wr (io/writer output)]
       :class java.io.Writer}]))
+
+(deftest test-closeable-ok
+  (has-warnings
+    "(ns example
+       (:require [clojure.java.io :as io]))
+     (defn foo [f₁ f₂ f₃ f₄]
+       (with-open [rd₁ (io/reader f₁)
+                   rd₂ (io/reader f₂)]
+         (let [rd₃ (io/reader f₃)
+               rd₄ (io/reader f₄)]
+           (try
+             [rd₁ rd₂ rd₃ rd₄]
+             (finally
+               (.close rd₄)
+               (.close rd₃))))))"
+    []))
+
+(deftest test-closeable-close-in-binding
+  (has-warnings
+    "(ns example
+       (:require [clojure.java.io :as io]))
+     (defn foo [input]
+       (let [rd (io/reader input)
+             v :do-something
+             _ (.close rd)]
+         v))"
+    []))
+
+; TODO: The go macro tears apart forms
+; (deftest test-closeable-go-blocks
+;   (has-warnings
+;     "(ns example
+;        (:require [clojure.core.async :as a]
+;                  [clojure.java.io :as io]))
+;      (defn foo [ch file]
+;        (a/go
+;          (with-open [wr (io/writer file)]
+;            (io/copy (<! ch) wr))))"
+;     []))

@@ -67,29 +67,39 @@
   (-> ast :instance :form))
 
 (defn ^:private closed-in-scope?
-  "Only detects resource management in a let or loop, followed by a
-   try/finally, with .close called in the finally clause. This is the
-   macroexpansion of clojure.core/with-open, as well as good practice.
+  "Detects resource management in a let or loop, followed by a try/finally,
+   with .close called in the finally clause. This is the macroexpansion of
+   clojure.core/with-open, as well as good practice.
 
    e.g. (loop-or-let [rsrc (ctor)]
           (try
             body
             (finally
               (.close rsrc))))
+
+   If a resource is closed in the same binding vector in which it is opened
+   (this happens in the macroexpansion of a core.async go block), this is
+   detected as well.
+
+   e.g. (let [rsrc (ctor)
+              x (f rsrc)
+              _ (.close rsrc)]
+          …)
    "
-  [scope-ast resource-ast]
+  [resource-ast scope-ast next-nodes]
   (let [{:keys [form]} resource-ast
-        [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))]
-    (->> (conj stmts ret)
+        [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))
+        inits (map :init next-nodes)]
+    (->> (concat inits stmts [ret])
          (filter close-call?)
          (map instance-sym)
          (some #{form})
          boolean)))
 
-(defn ^:private add-unclosed-nodes [unclosed node]
+(defn ^:private add-unclosed-nodes [unclosed node next-nodes]
   (->> (:bindings node)
        (filter #(and (closeable-opening-form? (:init %))
-                     (not (closed-in-scope? node %))))
+                     (not (closed-in-scope? % node next-nodes))))
        (into unclosed)))
 
 (defn ^:private find-unclosed-resources [form]
@@ -100,8 +110,8 @@
         (recur (conj unclosed node) more)
         (if (contains? #{:let :loop} (:op node))
           ;; Process this binding form, then skip ahead to the body
-          (recur (add-unclosed-nodes unclosed node)
-                 (drop-while #(not= :do (:op %)) more))
+          (let [[bindings more] (split-with #(not= :do (:op %)) more)]
+            (recur (add-unclosed-nodes unclosed node bindings) more))
           (recur unclosed more)))
       unclosed)))
 

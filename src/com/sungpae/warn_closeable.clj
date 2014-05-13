@@ -164,7 +164,7 @@
    namespace. If no namespace symbols are given, all project namespaces on the
    classpath are linted."
   ([]
-   (warn-closeable! (sort (project-namespace-symbols))))
+   (apply warn-closeable! (sort (project-namespace-symbols))))
   ([& ns-syms]
    (doseq [ns-sym ns-syms]
      (try

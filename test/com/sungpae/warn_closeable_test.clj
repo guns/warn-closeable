@@ -67,3 +67,21 @@
       :line 3
       :form '[ss (new java.net.ServerSocket port 0xff host)]
       :class java.net.ServerSocket}]))
+
+(deftest test-closeable-multiple-bindings
+  (has-warnings
+    "(ns example
+       (:require [clojure.java.io :as io]))
+     (defn foo [input output]
+       (let [rd (io/reader input)
+             _ :nothing
+             wr (io/writer output)]
+         (io/copy rd wr)))"
+    [{:ns 'example
+      :line 4
+      :form '[rd (io/reader input)]
+      :class java.io.Reader}
+     {:ns 'example
+      :line 4
+      :form '[wr (io/writer output)]
+      :class java.io.Writer}]))

@@ -155,7 +155,7 @@
    classpath are linted."
   ([]
    (warn-closeable! (sort (project-namespace-symbols))))
-  ([ns-syms]
+  ([& ns-syms]
    (doseq [ns-sym ns-syms]
      (try
        (require ns-sym)

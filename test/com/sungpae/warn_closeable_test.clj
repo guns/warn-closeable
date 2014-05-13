@@ -12,8 +12,7 @@
                   string/join
                   (format "test/%s.clj"))
         ;; List equality fails with :static-call form for an unknown reason
-        munge (fn [coll]
-                (into #{} (mapv #(update-in % [:form] str) coll)))]
+        munge (fn [coll] (mapv #(update-in % [:form] str) coll))]
     (try
       (spit path clj-string)
       (require name :reload)
@@ -60,9 +59,9 @@
            (f s)))"
       [{:ns 'example
         :line 3
-        :form '[ss (new java.net.ServerSocket port 0xff host)]
-        :class java.net.ServerSocket}
+        :form '[s (. ss accept)]
+        :class java.net.Socket}
        {:ns 'example
         :line 3
-        :form '[s (. ss accept)]
-        :class java.net.Socket}])))
+        :form '[ss (new java.net.ServerSocket port 0xff host)]
+        :class java.net.ServerSocket}])))

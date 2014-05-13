@@ -1,44 +1,49 @@
 (ns com.sungpae.warn-closeable
   "Contains a rudimentary linter for resource leaks.
 
-   If an AutoCloseable object is created, but not closed in a finally block
+   If an AutoCloseable object is created but not closed in a finally block
    immediately following the binding vector in which it is opened, a warning
    is issued.
 
    e.g.
 
-     ;; `from` and `to` are never closed!
-     (let [from (PushbackReader. (io/reader input))
-           to (io/output-stream output)]
-       (io/copy from to))
+     (ns example
+       (:require [clojure.java.io :as io])
+       (:import (java.security.cert CertificateFactory)))
 
-     ;; (closeable-warnings *ns*)
-     ;; -> ({:ns … :line … :form [from (new PushbackReader (io/reader input))]}
-     ;;     {:ns … :line … :form [to (io/output-stream output]})
+     (defn make-certificates [x509-cert-file]
+       (.generateCertificates (CertificateFactory/getInstance \"X.509\")
+                              (io/input-stream x509-cert-file)))
 
-     (with-open [from (PushbackReader. (io/reader input))
-                 to (io/output-stream output)]
-       (io/copy from to))
+   We run (warn-closeable! '[example]) to produce output like:
+
+     {:ns example, :line 7, :form (io/input-stream x509-cert-file), :class java.io.InputStream}
+
+   This serves as a reminder that the creation of an InputStream should be
+   wrapped in with-open:
+
+     (defn make-certificates [x509-cert-file]
+       (with-open [input (io/input-stream x509-cert-file)]
+         (.generateCertificates (CertificateFactory/getInstance \"X.509\") input)))
    "
   (:require [clojure.java.io :as io]
+            [clojure.string :as string]
             [clojure.tools.analyzer :as ana]
             [clojure.tools.analyzer.ast :as ast]
             [clojure.tools.analyzer.jvm :as jvm]
             [clojure.tools.namespace.find :refer [find-namespaces]])
   (:import (clojure.lang ExceptionInfo LineNumberingPushbackReader Namespace)
-           (java.io ByteArrayInputStream ByteArrayOutputStream File
-                    StringReader StringWriter)
+           (java.io File)
            (java.lang AutoCloseable)
            (java.net URL URLClassLoader URLDecoder)))
 
 (def ^:dynamic *nop-closeables*
-  "Set of classes whose close methods are NOPs. Includes StringReader, whose
-   close method does have an effect. However, as the source is a String,
-   hardly anybody bothers closing it."
-  #{ByteArrayInputStream
-    ByteArrayOutputStream
-    StringReader
-    StringWriter})
+  "Set of classes whose close methods are NOPs. StringReader#close is not a
+   NOP, but since the resource is a String, it is often left unclosed."
+  #{java.io.ByteArrayInputStream
+    java.io.ByteArrayOutputStream
+    java.io.StringReader
+    java.io.StringWriter})
 
 (defn ^:private analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
@@ -76,15 +81,15 @@
   (let [{:keys [form]} resource-ast
         [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))]
     (->> (conj stmts ret)
-         (filterv close-call?)
-         (mapv instance-sym)
+         (filter close-call?)
+         (map instance-sym)
          (some #{form})
          boolean)))
 
 (defn ^:private add-unclosed-nodes [unclosed node]
   (->> (:bindings node)
-       (filterv #(and (closeable-opening-form? (:init %))
-                      (not (closed-in-scope? node %))))
+       (filter #(and (closeable-opening-form? (:init %))
+                     (not (closed-in-scope? node %))))
        (into unclosed)))
 
 (defn ^:private find-unclosed-resources [form]
@@ -100,37 +105,42 @@
           (recur unclosed more)))
       unclosed)))
 
-(defn closeable-warnings [^Namespace ns]
+(defn closeable-warnings
+  "Returns a vector of warnings sorted by line number. Warnings are
+   PersistentArrayMaps with :ns, :line, :form, and :class entries."
+  [^Namespace ns]
   (binding [*ns* ns]
     (with-open [rdr (->> (str ns)
                          (replace {\. \/ \- \_})
-                         (apply str)
+                         string/join
                          (format "%s.clj")
                          io/resource
                          io/reader
                          LineNumberingPushbackReader.)]
       (let [form (take-while (partial not= ::done)
                              (repeatedly #(read rdr false ::done)))
-            errors (find-unclosed-resources form)]
-        (doall
-          (for [ast errors
-                :let [{:keys [form tag env]} ast
-                      {:keys [ns line]} env
-                      value (-> ast :init :form)]]
-            (array-map
-              :ns ns
-              :line line
-              :form (if value [form value] form)
-              :class tag)))))))
+            errors (find-unclosed-resources form)
+            ws (for [ast errors
+                     :let [{:keys [form tag env]} ast
+                           {:keys [ns line]} env
+                           value (-> ast :init :form)]]
+                 (array-map :ns ns
+                            :line line
+                            :form (if value [form value] form)
+                            :class tag))]
+        (vec (sort-by (juxt :line :form) ws))))))
 
 (defn ^:private classpath []
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
-(defn project-namespaces
-  "Namespaces declared in Clojure source files in paths."
+(defn project-namespace-symbols
+  "Extract a sequence of ns symbols in *.clj files from a collection of
+   paths, which may be a mix of files or directories, and may be any type
+   implementing clojure.java.io/Coercions. If no paths are given, the entire
+   classpath is searched."
   ([]
-   (project-namespaces (classpath)))
+   (project-namespace-symbols (classpath)))
   ([paths]
    (->> paths
         (map io/file)
@@ -140,10 +150,13 @@
         find-namespaces)))
 
 (defn warn-closeable!
+  "Iterate through ns-syms and print the results of closeable-warnings on the
+   namespace. If no namespace symbols are given, all project namespaces on the
+   classpath are linted."
   ([]
-   (warn-closeable! (project-namespaces)))
-  ([namespaces]
-   (doseq [ns-sym namespaces]
+   (warn-closeable! (sort (project-namespace-symbols))))
+  ([ns-syms]
+   (doseq [ns-sym ns-syms]
      (try
        (require ns-sym)
        (let [ns (find-ns ns-sym)]

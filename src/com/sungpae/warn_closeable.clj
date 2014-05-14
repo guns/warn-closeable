@@ -138,7 +138,7 @@
                             :line line
                             :form (if value [form value] form)
                             :class tag))]
-        (vec (sort-by (juxt :line :form) ws))))))
+        (vec (sort-by (juxt :line (comp str :form)) ws))))))
 
 (defn ^:private classpath []
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]

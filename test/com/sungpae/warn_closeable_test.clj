@@ -1,12 +1,11 @@
 (ns com.sungpae.warn-closeable-test
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.string :as string]
             [clojure.test :refer [deftest is testing]]
             [com.sungpae.warn-closeable :refer [closeable-warnings]]))
 
 (defn has-warnings [clj-string warnings]
-  (let [name (second (edn/read-string clj-string))
+  (let [name (second (read-string clj-string))
         path (->> (str name)
                   (replace {\- \_ \. \/})
                   string/join

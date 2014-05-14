@@ -101,6 +101,16 @@
                (.close rd₃))))))"
     []))
 
+(deftest test-closeable-immediate-close
+  (has-warnings
+    "(ns example)
+     (defn foo [& args]
+       (let [cmd ^\"[Ljava.lang.String;\" (into-array String args)
+             proc (.exec (Runtime/getRuntime) cmd)]
+         (.close (.getInputStream proc))
+         proc))"
+    []))
+
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding
 ;   (has-warnings

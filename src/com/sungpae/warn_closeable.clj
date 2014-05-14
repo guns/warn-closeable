@@ -52,16 +52,24 @@
             ana/var?          var?]
     (jvm/analyze form (jvm/empty-env))))
 
-(defn- closeable? [ast]
+(defn- closeable?
+  "Is this a fn or interop call that returns an AutoCloseable object?"
+  [ast]
   (let [{:keys [op tag]} ast]
     (and (contains? #{:invoke :new :static-call :instance-call} op)
          (class? tag)
          (not (contains? *nop-closeables* tag))
          (.isAssignableFrom AutoCloseable tag))))
 
-(defn- closing-call? [ast]
+(defn- closing-call?
+  "Is this a .close interop call on a local binding or a fn/method that
+   returns an AutoCloseable object?"
+  [ast]
   (and (= :instance-call (:op ast))
-       (= 'close (:method ast))))
+       (= 'close (:method ast))
+       (let [inst (:instance ast)]
+         (or (= :local (:op inst))
+             (closeable? inst)))))
 
 (defn- instance-form [ast]
   (-> ast :instance :form))
@@ -86,27 +94,35 @@
          (some #{form})
          boolean)))
 
-(defn- unclosed-bindings [ast]
+(defn- unclosed-bindings
+  "Return a vector of binding nodes in :bindings that do not have a paired
+   closing call in the :body node."
+  [ast]
   (filterv #(and (closeable? (:init %))
                  (not (closed-in-scope? % ast)))
            (:bindings ast)))
 
-(defn- unclosed-resources [ast]
+(defn- unclosed-resources
+  "Return a vector of unclosed local bindings or Closeable fn/method calls at
+   the top level of the node."
+  [ast]
   (cond
-    ;; A Closeable form outside of a binding vector is considered unclosed
-    (closeable? ast) [ast]
     (contains? #{:let :loop} (:op ast)) (unclosed-bindings ast)
+    (closeable? ast) [ast]
     :else []))
 
-(defn- children [ast]
+(defn- children
+  "Returns a vector of the child nodes in ast, excluding those that are
+   handled by #'unclosed-resources"
+  [ast]
   (cond
-    ;; KISS and don't recurse into (.close …) forms
-    (closing-call? ast) []
-    ;; :bindings of :let and :loop nodes are handled explicitly
     (contains? #{:let :loop} (:op ast)) [(:body ast)]
+    (closing-call? ast) []
     :else (ast/children ast)))
 
-(defn- find-unclosed-resources [ast]
+(defn- find-unclosed-resources
+  "Recurse through ast and return a vector of all unclosed nodes."
+  [ast]
   (binding [*print-length* nil *print-level* 8]
     (reduce into
             (unclosed-resources ast)

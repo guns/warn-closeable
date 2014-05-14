@@ -16,8 +16,8 @@
     (try
       (spit path clj-string)
       (require name :reload)
-      (is (= (munge warnings)
-             (munge (closeable-warnings (find-ns name)))))
+      (is (= (munge (closeable-warnings (find-ns name)))
+             (munge warnings)))
       (finally
         (remove-ns name)
         (io/delete-file path :silently true)))))
@@ -61,12 +61,12 @@
          (f s)))"
     [{:ns 'example
       :line 3
-      :form '[s (. ss accept)]
-      :class java.net.Socket}
+      :form '[ss (new java.net.ServerSocket port 0xff host)]
+      :class java.net.ServerSocket}
      {:ns 'example
       :line 3
-      :form '[ss (new java.net.ServerSocket port 0xff host)]
-      :class java.net.ServerSocket}]))
+      :form '[s (. ss accept)]
+      :class java.net.Socket}]))
 
 (deftest test-closeable-multiple-bindings
   (has-warnings

@@ -45,28 +45,28 @@
     java.io.StringReader
     java.io.StringWriter})
 
-(defn ^:private analyze [form]
+(defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
             ana/create-var    jvm/create-var
             ana/parse         jvm/parse
             ana/var?          var?]
     (jvm/analyze form (jvm/empty-env))))
 
-(defn ^:private closeable-opening-form? [ast]
+(defn- closeable? [ast]
   (let [{:keys [op tag]} ast]
     (and (contains? #{:invoke :new :static-call :instance-call} op)
          (class? tag)
          (not (contains? *nop-closeables* tag))
          (.isAssignableFrom AutoCloseable tag))))
 
-(defn ^:private close-call? [ast]
+(defn- closing-call? [ast]
   (and (= :instance-call (:op ast))
        (= 'close (:method ast))))
 
-(defn ^:private instance-sym [ast]
+(defn- instance-form [ast]
   (-> ast :instance :form))
 
-(defn ^:private closed-in-scope?
+(defn- closed-in-scope?
   "Detects resource management in a let or loop, followed by a try/finally,
    with .close called in the finally clause. This is the macroexpansion of
    clojure.core/with-open, as well as good practice.
@@ -77,43 +77,49 @@
             (finally
               (.close rsrc))))
 
-   If a resource is closed in the same binding vector in which it is opened
-   (this happens in the macroexpansion of a core.async go block), this is
-   detected as well.
+   If a resource is closed in the same binding vector in which it is opened,
+   this is detected as well.
 
    e.g. (let [rsrc (ctor)
               x (f rsrc)
               _ (.close rsrc)]
           …)
    "
-  [resource-ast scope-ast next-nodes]
-  (let [{:keys [form]} resource-ast
-        [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))
-        inits (map :init next-nodes)]
+  [closeable-ast scope-ast]
+  (let [{:keys [form]} closeable-ast
+        inits (map :init (:bindings scope-ast))
+        [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))]
     (->> (concat inits stmts [ret])
-         (filter close-call?)
-         (map instance-sym)
+         (filter closing-call?)
+         (map instance-form)
          (some #{form})
          boolean)))
 
-(defn ^:private add-unclosed-nodes [unclosed node next-nodes]
-  (->> (:bindings node)
-       (filter #(and (closeable-opening-form? (:init %))
-                     (not (closed-in-scope? % node next-nodes))))
-       (into unclosed)))
+(defn- unclosed-bindings [ast]
+  (filterv #(and (closeable? (:init %))
+                 (not (closed-in-scope? % ast)))
+           (:bindings ast)))
 
-(defn ^:private find-unclosed-resources [form]
-  (loop [unclosed #{} [node & more] (ast/nodes (analyze form))]
-    (if node
-      (if (closeable-opening-form? node)
-        ;; A Closeable form outside of a binding vector is considered unclosed
-        (recur (conj unclosed node) more)
-        (if (contains? #{:let :loop} (:op node))
-          ;; Process this binding form, then skip ahead to the body
-          (let [[bindings more] (split-with #(not= :do (:op %)) more)]
-            (recur (add-unclosed-nodes unclosed node bindings) more))
-          (recur unclosed more)))
-      unclosed)))
+(defn- unclosed-resources [ast]
+  (cond
+    ;; A Closeable form outside of a binding vector is considered unclosed
+    (closeable? ast) [ast]
+    (contains? #{:let :loop} (:op ast)) (unclosed-bindings ast)
+    :else []))
+
+(defn- children [ast]
+  (cond
+    ;; KISS and don't recurse into (.close …) forms
+    (closing-call? ast) []
+    ;; :bindings of :let and :loop nodes are handled explicitly
+    (contains? #{:let :loop} (:op ast)) [(:body ast)]
+    :else (ast/children ast)))
+
+(defn- find-unclosed-resources [ast]
+  (binding [*print-length* nil *print-level* 8]
+    (reduce into
+            (unclosed-resources ast)
+            (mapv find-unclosed-resources (children ast)))))
 
 (defn closeable-warnings
   "Returns a vector of warnings sorted by line number. Warnings are
@@ -129,18 +135,18 @@
                          LineNumberingPushbackReader.)]
       (let [form (take-while (partial not= ::done)
                              (repeatedly #(read rdr false ::done)))
-            errors (find-unclosed-resources form)
-            ws (for [ast errors
-                     :let [{:keys [form tag env]} ast
-                           {:keys [ns line]} env
-                           value (-> ast :init :form)]]
-                 (array-map :ns ns
-                            :line line
-                            :form (if value [form value] form)
-                            :class tag))]
-        (vec (sort-by (juxt :line (comp str :form)) ws))))))
+            errors (find-unclosed-resources (analyze form))]
+        (vec
+          (for [ast errors
+                :let [{:keys [form tag env]} ast
+                      {:keys [ns line]} env
+                      value (-> ast :init :form)]]
+            (array-map :ns ns
+                       :line line
+                       :form (if value [form value] form)
+                       :class tag)))))))
 
-(defn ^:private classpath []
+(defn- classpath []
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 

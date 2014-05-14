@@ -102,16 +102,17 @@
                (.close rd₃))))))"
     []))
 
-(deftest test-closeable-close-in-binding
-  (has-warnings
-    "(ns example
-       (:require [clojure.java.io :as io]))
-     (defn foo [input]
-       (let [rd (io/reader input)
-             v :do-something
-             _ (.close rd)]
-         v))"
-    []))
+; TODO: If we do this, it must be more flexible
+; (deftest test-closeable-close-in-binding
+;   (has-warnings
+;     "(ns example
+;        (:require [clojure.java.io :as io]))
+;      (defn foo [input]
+;        (let [rd (io/reader input)
+;              v :do-something
+;              _ (.close rd)]
+;          v))"
+;     []))
 
 ; TODO: The go macro tears apart forms
 ; (deftest test-closeable-go-blocks

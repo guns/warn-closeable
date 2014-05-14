@@ -76,20 +76,11 @@
             body
             (finally
               (.close rsrc))))
-
-   If a resource is closed in the same binding vector in which it is opened,
-   this is detected as well.
-
-   e.g. (let [rsrc (ctor)
-              x (f rsrc)
-              _ (.close rsrc)]
-          …)
    "
   [closeable-ast scope-ast]
   (let [{:keys [form]} closeable-ast
-        inits (map :init (:bindings scope-ast))
         [stmts ret] ((juxt :statements :ret) (-> scope-ast :body :ret :finally))]
-    (->> (concat inits stmts [ret])
+    (->> (concat stmts [ret])
          (filter closing-call?)
          (map instance-form)
          (some #{form})

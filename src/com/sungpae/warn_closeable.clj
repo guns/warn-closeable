@@ -67,9 +67,9 @@
   (-> ast :instance :form))
 
 (defn- closed-in-scope?
-  "Detects resource management in a let or loop, followed by a try/finally,
-   with .close called in the finally clause. This is the macroexpansion of
-   clojure.core/with-open, as well as good practice.
+  "Detects creation of a new Closeable resource in a let or loop, followed
+   by a try/finally, with .close called in the finally clause. This is the
+   macroexpansion of clojure.core/with-open, as well as good practice.
 
    e.g. (loop-or-let [rsrc (ctor)]
           (try

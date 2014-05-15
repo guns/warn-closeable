@@ -85,6 +85,19 @@
       :form '[wr (io/writer output)]
       :class java.io.Writer}]))
 
+(deftest test-closeable-nested-bindings
+  (has-warnings
+    "(ns example
+       (:require [clojure.java.io :as io]))
+     (defn foo [input]
+       (let [rd (let [rd (io/reader input)]
+                  rd)]
+         (.read rd)))"
+    [{:ns 'example
+      :line 4
+      :form '[rd (io/reader input)]
+      :class java.io.Reader}]))
+
 (deftest test-closeable-ok
   (has-warnings
     "(ns example

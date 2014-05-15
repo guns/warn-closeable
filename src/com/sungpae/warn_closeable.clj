@@ -102,31 +102,31 @@
                  (not (closed-in-scope? % ast)))
            (:bindings ast)))
 
-(defn- unclosed-resources
-  "Return a vector of unclosed local bindings or Closeable fn/method calls at
-   the top level of the node."
+(defn- non-closeable-bindings
+  "Return a vector on binding nodes that do not bind Closeable calls."
   [ast]
-  (cond
-    (contains? #{:let :loop} (:op ast)) (unclosed-bindings ast)
-    (closeable? ast) [ast]
-    :else []))
+  (filterv (comp not closeable? :init) (:bindings ast)))
 
-(defn- children
-  "Returns a vector of the child nodes in ast, excluding those that are
-   handled by #'unclosed-resources"
+(defn- unclosed-resources
+  "Return a tuple of:
+
+   * Top level unclosed local bindings or Closeable fn/method calls
+   * Child nodes that should be investigated."
   [ast]
   (cond
-    (contains? #{:let :loop} (:op ast)) [(:body ast)]
+    (contains? #{:let :loop} (:op ast)) [(unclosed-bindings ast)
+                                         (conj (non-closeable-bindings ast)
+                                               (:body ast))]
+    (closeable? ast) [[ast] []]
     (closing-call? ast) []
-    :else (ast/children ast)))
+    :else [[] (ast/children ast)]))
 
 (defn- find-unclosed-resources
-  "Recurse through ast and return a vector of all unclosed nodes."
+  "Traverse ast and return a vector of all unclosed nodes."
   [ast]
   (binding [*print-length* nil *print-level* 8]
-    (reduce into
-            (unclosed-resources ast)
-            (mapv find-unclosed-resources (children ast)))))
+    (let [[unclosed children] (unclosed-resources ast)]
+      (reduce into unclosed (mapv find-unclosed-resources children)))))
 
 (defn closeable-warnings
   "Returns a vector of warnings sorted by line number. Warnings are

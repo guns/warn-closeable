@@ -1,5 +1,5 @@
 (defproject com.sungpae/warn-closeable "0.1.0-SNAPSHOT"
-  :description "Warn on possibly unclosed AutoCloseable resources."
+  :description "Warn on potentially unclosed (Auto)Closeable resources."
   :url "https://github.com/guns/warn-closeable"
   :license {:name "MIT License"
             :url "http://opensource.org/licenses/MIT"}

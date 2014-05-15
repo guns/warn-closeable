@@ -1,7 +1,7 @@
 (ns com.sungpae.warn-closeable
   "Contains a rudimentary linter for resource leaks.
 
-   If an AutoCloseable object is created but not closed in a finally block
+   If an (Auto)Closeable object is created but not closed in a finally block
    immediately following the binding vector in which it is opened, a warning
    is issued.
 
@@ -34,8 +34,14 @@
             [clojure.tools.namespace.find :refer [find-namespaces]])
   (:import (clojure.lang ExceptionInfo LineNumberingPushbackReader Namespace)
            (java.io File)
-           (java.lang AutoCloseable)
            (java.net URL URLClassLoader URLDecoder)))
+
+(def ^:private ^Class BASE-INTERFACE
+  "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."
+  (try
+    (Class/forName "java.lang.AutoCloseable")
+    (catch ClassNotFoundException _
+      java.io.Closeable)))
 
 (def ^:dynamic *nop-closeables*
   "Set of classes whose close methods are NOPs.
@@ -60,17 +66,17 @@
     (jvm/analyze form (jvm/empty-env))))
 
 (defn- closeable?
-  "Is this a fn or interop call that returns an AutoCloseable object?"
+  "Is this a fn or interop call that returns an (Auto)Closeable object?"
   [ast]
   (let [{:keys [op tag]} ast]
     (and (contains? #{:invoke :new :static-call :instance-call} op)
          (class? tag)
          (not (contains? *nop-closeables* tag))
-         (.isAssignableFrom AutoCloseable tag))))
+         (.isAssignableFrom BASE-INTERFACE tag))))
 
 (defn- closing-call?
   "Is this a .close interop call on a local binding or a fn/method that
-   returns an AutoCloseable object?"
+   returns an (Auto)Closeable object?"
   [ast]
   (and (= :instance-call (:op ast))
        (= 'close (:method ast))

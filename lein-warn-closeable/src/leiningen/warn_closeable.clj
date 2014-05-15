@@ -1,5 +1,5 @@
 (ns leiningen.warn-closeable
-  "Warn on potentially unclosed AutoCloseable resources"
+  "Warn on potentially unclosed (Auto)Closeable resources"
   (:require [leiningen.core.eval :refer [eval-in-project]]
             [leiningen.core.project :refer [merge-profiles]]))
 

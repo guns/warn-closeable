@@ -43,20 +43,16 @@
     (catch ClassNotFoundException _
       java.io.Closeable)))
 
-(def ^:dynamic *nop-closeables*
-  "Set of classes whose close methods are NOPs.
-
-   * While StringReader#close is not a NOP, the resource is a String so it is
-     often left unclosed
-   * The close method of JarFile and ZipFile do close InputStreams, but only
-     when at least one is created by ZipFile#getInputStream; this method call
-     can be detected directly, so we can ignore the constructor invocation"
+(def ^:dynamic *resource-free-closeables*
+  "Set of (Auto)Closeable classes that do not allocate OS resources.
+   cf. Eclipse: TypeConstants.JAVA_IO_RESOURCE_FREE_CLOSEABLES"
   #{java.io.ByteArrayInputStream
     java.io.ByteArrayOutputStream
+    java.io.CharArrayReader
+    java.io.CharArrayWriter
     java.io.StringReader
     java.io.StringWriter
-    java.util.jar.JarFile
-    java.util.zip.ZipFile})
+    java.io.StringBufferInputStream})
 
 (defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
@@ -71,7 +67,7 @@
   (let [{:keys [op tag]} ast]
     (and (contains? #{:invoke :new :static-call :instance-call} op)
          (class? tag)
-         (not (contains? *nop-closeables* tag))
+         (not (contains? *resource-free-closeables* tag))
          (.isAssignableFrom BASE-INTERFACE tag))))
 
 (defn- closing-call?

@@ -120,21 +120,12 @@
      (defn foo [^String s]
        (let [bais (java.io.ByteArrayInputStream (.getBytes s))
              baos (java.io.ByteArrayOutputStream.)
+             cr (java.io.CharArrayReader. (char-array s))
+             cw (java.io.CharArrayWriter.)
              sr (java.io.StringReader. s)
-             sw (java.io.StringWriter.)
-             jf (java.util.jar.JarFile. s)
-             zf (java.util.zip.ZipFile. s)]
-         [bais baos sr sw
-          (.getInputStream jf (first (.entries jf)))
-          (.getInputStream zf (first (.entries zf)))]))"
-    [{:ns 'example
-      :line 10
-      :form '(. jf (getInputStream (first (.entries jf))))
-      :class java.io.InputStream}
-     {:ns 'example
-      :line 11
-      :form '(. zf (getInputStream (first (.entries zf))))
-      :class java.io.InputStream}]))
+             sw (java.io.StringWriter.)]
+         [bais baos cr cw sr sw]))"
+    []))
 
 (deftest test-closeable-immediate-close
   (has-warnings

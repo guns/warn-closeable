@@ -188,19 +188,20 @@
   ([]
    (apply warn-closeable! (project-namespace-symbols)))
   ([& ns-syms]
-   (doseq [ns-sym ns-syms]
-     (try
-       (require ns-sym)
-       (let [ns (find-ns ns-sym)]
-         (doseq [w (closeable-warnings ns)]
-           (prn w)))
-       (catch ExceptionInfo e
-         (let [{:keys [column line class ast]} (.data e)]
-           (prn (array-map :ns ns-sym
-                           :error (.getMessage e)
-                           :line line
-                           :column column
-                           :form (:form ast)
-                           :class class))))
-       (catch Throwable e
-         (printf "[%s] %s\n" ns-sym e))))))
+   (binding [*warn-on-reflection* false]
+     (doseq [ns-sym ns-syms]
+       (try
+         (require ns-sym)
+         (let [ns (find-ns ns-sym)]
+           (doseq [w (closeable-warnings ns)]
+             (prn w)))
+         (catch ExceptionInfo e
+           (let [{:keys [column line class ast]} (.data e)]
+             (prn (array-map :ns ns-sym
+                             :error (.getMessage e)
+                             :line line
+                             :column column
+                             :form (:form ast)
+                             :class class))))
+         (catch Throwable e
+           (printf "[%s] %s\n" ns-sym e)))))))

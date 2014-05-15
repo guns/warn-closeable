@@ -13,5 +13,6 @@
   (let [profile (or (:warn-closeable project) warn-closeable-profile)
         project (merge-profiles project [profile])]
     (eval-in-project project
-      `(com.sungpae.warn-closeable/warn-closeable! ~@src-paths)
+      `(binding [*warn-on-reflection* false]
+         (com.sungpae.warn-closeable/warn-closeable! ~@src-paths))
       `(require 'com.sungpae.warn-closeable))))

@@ -10,7 +10,7 @@
                   (replace {\- \_ \. \/})
                   string/join
                   (format "test/%s.clj"))
-        ;; List equality fails with :static-call form for an unknown reason
+        ;; List equality fails with :static-call forms
         munge (fn [coll] (mapv #(update-in % [:form] str) coll))]
     (try
       (spit path clj-string)

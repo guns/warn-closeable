@@ -88,9 +88,9 @@
   (-> ast :instance :form))
 
 (defn- closed-in-scope?
-  "Detects creation of a new Closeable resource in a let or loop, followed
-   by a try/finally, with .close called in the finally clause. This is the
-   macroexpansion of clojure.core/with-open, as well as good practice.
+  "Detects creation of a new (Auto)Closeable resource in a let or loop,
+   followed by a try/finally, with .close called in the finally clause. This
+   is the macroexpansion of clojure.core/with-open, as well as good practice.
 
    e.g. (loop-or-let [rsrc (ctor)]
           (try
@@ -116,14 +116,14 @@
            (:bindings ast)))
 
 (defn- non-closeable-bindings
-  "Return a vector on binding nodes that do not bind Closeable calls."
+  "Return a vector on binding nodes that do not bind (Auto)Closeable calls."
   [ast]
   (filterv (comp not closeable? :init) (:bindings ast)))
 
 (defn- unclosed-resources
   "Return a tuple of:
 
-   * Top level unclosed local bindings or Closeable fn/method calls
+   * Top level unclosed local bindings or (Auto)Closeable fn/method calls
    * Child nodes that should be investigated."
   [ast]
   (cond
@@ -142,8 +142,8 @@
       (reduce into unclosed (mapv find-unclosed-resources children)))))
 
 (defn closeable-warnings
-  "Returns a vector of warnings sorted by line number. Warnings are
-   PersistentArrayMaps with :ns, :line, :form, and :class entries."
+  "Returns a vector of potentially unclosed (Auto)Closeable warnings. Warnings
+   are PersistentArrayMaps with :ns, :line, :form, and :class entries."
   [^Namespace ns]
   (binding [*ns* ns]
     (with-open [rdr (->> (str ns)

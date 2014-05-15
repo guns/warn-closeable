@@ -38,12 +38,19 @@
            (java.net URL URLClassLoader URLDecoder)))
 
 (def ^:dynamic *nop-closeables*
-  "Set of classes whose close methods are NOPs. StringReader#close is not a
-   NOP, but since the resource is a String, it is often left unclosed."
+  "Set of classes whose close methods are NOPs.
+
+   * While StringReader#close is not a NOP, the resource is a String so it is
+     often left unclosed
+   * The close method of JarFile and ZipFile do close InputStreams, but only
+     when at least one is created by ZipFile#getInputStream; this method call
+     can be detected directly, so we can ignore the constructor invocation"
   #{java.io.ByteArrayInputStream
     java.io.ByteArrayOutputStream
     java.io.StringReader
-    java.io.StringWriter})
+    java.io.StringWriter
+    java.util.jar.JarFile
+    java.util.zip.ZipFile})
 
 (defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1

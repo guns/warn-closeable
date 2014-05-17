@@ -10,7 +10,7 @@
   "Arguments are files and directories containing Clojure source files. If no
    arguments are given, all project namespaces are linted."
   [project & src-paths]
-  (let [profile (or (:warn-closeable project) warn-closeable-profile)
+  (let [profile (get project :warn-closeable warn-closeable-profile)
         project (merge-profiles project [profile])]
     (eval-in-project project
       `(com.sungpae.warn-closeable/warn-closeable! ~@src-paths)

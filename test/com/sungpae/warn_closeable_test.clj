@@ -2,24 +2,32 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as string]
             [clojure.test :refer [deftest is testing]]
-            [com.sungpae.warn-closeable :refer [closeable-warnings]]))
+            [com.sungpae.warn-closeable :refer [closeable-warnings
+                                                with-reflection-warnings]]))
 
-(defn has-warnings [clj-string warnings]
-  (let [name (second (read-string clj-string))
-        path (->> (str name)
-                  (replace {\- \_ \. \/})
-                  string/join
-                  (format "test/%s.clj"))
-        ;; List equality fails with :static-call forms
-        munge (fn [coll] (mapv #(update-in % [:form] str) coll))]
-    (try
-      (spit path clj-string)
-      (require name :reload)
-      (is (= (munge (closeable-warnings (find-ns name)))
-             (munge warnings)))
-      (finally
-        (remove-ns name)
-        (io/delete-file path :silently true)))))
+(defn has-warnings
+  ([clj-string c-warnings]
+   (has-warnings clj-string c-warnings nil))
+  ([clj-string c-warnings r-warnings]
+   (let [name (second (read-string clj-string))
+         path (->> (str name)
+                   (replace {\- \_ \. \/})
+                   string/join
+                   (format "test/%s.clj"))
+         ;; List equality fails with :static-call forms
+         form-str (fn [coll] (mapv #(update-in % [:form] str) coll))]
+     (try
+       (spit path clj-string)
+       (binding [*warn-on-reflection* false]
+         (require name :reload))
+       (let [ns (find-ns name)
+             [rs cs] (with-reflection-warnings ns
+                       (closeable-warnings ns))]
+         (is (= (form-str cs) (form-str c-warnings)))
+         (when (seq r-warnings) (is (= rs r-warnings))))
+       (finally
+         (remove-ns name)
+         (io/delete-file path :silently true))))))
 
 (deftest test-closeable-invoke
   (has-warnings
@@ -136,6 +144,16 @@
          (.close (.getInputStream proc))
          proc))"
     []))
+
+(deftest test-closeable-pretty-reflection-errors
+  (has-warnings
+    "(ns example)
+     (defn foo [x]
+       (boolean (.getInputStream x)))"
+    []
+    [{:ns 'example
+      :line 3
+      :message "reference to field or no args method call getInputStream cannot be resolved"}]))
 
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding

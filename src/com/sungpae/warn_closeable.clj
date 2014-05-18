@@ -33,7 +33,7 @@
             [clojure.tools.analyzer.jvm :as jvm]
             [clojure.tools.namespace.find :refer [find-namespaces]])
   (:import (clojure.lang ExceptionInfo LineNumberingPushbackReader Namespace)
-           (java.io File)
+           (java.io File PrintWriter StringWriter)
            (java.net URL URLClassLoader URLDecoder)))
 
 (def ^:private ^Class BASE-INTERFACE
@@ -138,9 +138,13 @@
 
 (defn closeable-warnings
   "Returns a vector of potentially unclosed (Auto)Closeable warnings. Warnings
-   are PersistentArrayMaps with :ns, :line, :form, and :class entries."
+   are PersistentArrayMaps with :ns, :line, :form, and :class entries.
+
+   Since the analyzer may miss (Auto)Closeable objects when reflection is
+   used, the *warn-on-reflection* is bound to true during linting."
   [^Namespace ns]
-  (binding [*ns* ns]
+  (binding [*warn-on-reflection* true
+            *ns* ns]
     (with-open [rdr (->> (str ns)
                          (replace {\. \/ \- \_})
                          string/join
@@ -165,7 +169,7 @@
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
-(defn project-namespace-symbols
+(defn ^:internal project-namespace-symbols
   "Extract a sequence of ns symbols in *.clj files from a collection of
    paths, which may be a mix of files or directories, and may be any type
    implementing clojure.java.io/Coercions. If no paths are given, the entire
@@ -180,10 +184,39 @@
                       (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
         find-namespaces)))
 
+(defmacro ^:internal with-reflection-warnings [ns & body]
+  `(let [sw# (new ~StringWriter)
+         v# (binding [*warn-on-reflection* true
+                      *out* (new ~PrintWriter sw#)]
+              (do ~@body))
+         ws# (->> (str sw#)
+                  ~string/split-lines
+                  (filterv #(.startsWith ^String % "Reflection warning"))
+                  (mapv #(let [[_# l# m#] (re-find #"\S+:(\d+):[\d\s]*- (.*)" %)]
+                           (array-map :ns (ns-name ~ns)
+                                      :line (Long/parseLong l#)
+                                      :message m#))))]
+     [ws# v#]))
+
+(defn- print-reflection-warnings! [r-warnings]
+  (doseq [[ns ws] (group-by :ns r-warnings)]
+    (printf "[%s] REFLECTION WARNINGS:\n" ns)
+    (doseq [{:keys [line message]} ws]
+      (printf "  %d: %s\n" line message))))
+
+(defn- print-closeable-warnings! [c-warnings]
+  (doseq [[ns ws] (group-by :ns c-warnings)]
+    (printf "[%s] Possibly unclosed (Auto)Closeable resources:\n" ns)
+    (doseq [{:keys [line form class]} ws]
+      (printf "  %d: %s [%s]\n" line form class))))
+
 (defn warn-closeable!
   "Iterate through ns-syms and print the results of closeable-warnings on the
    namespace. If no namespace symbols are given, all project namespaces on the
-   classpath are linted."
+   classpath are linted.
+
+   Reflection warnings in the namespace are also printed, as statically
+   detecting (Auto)Closeable instances relies on properly type hinted code."
   ([]
    (apply warn-closeable! (project-namespace-symbols)))
   ([& ns-syms]
@@ -191,9 +224,11 @@
      (doseq [ns-sym ns-syms]
        (try
          (require ns-sym)
-         (let [ns (find-ns ns-sym)]
-           (doseq [w (closeable-warnings ns)]
-             (prn w)))
+         (let [ns (find-ns ns-sym)
+               [rs cs] (with-reflection-warnings ns
+                         (closeable-warnings ns))]
+           (print-reflection-warnings! rs)
+           (print-closeable-warnings! cs))
          (catch ExceptionInfo e
            (let [{:keys [column line class ast]} (.data e)]
              (prn (array-map :ns ns-sym

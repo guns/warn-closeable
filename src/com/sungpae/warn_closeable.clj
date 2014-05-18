@@ -133,9 +133,8 @@
 (defn- find-unclosed-resources
   "Traverse ast and return a vector of all unclosed nodes."
   [ast]
-  (binding [*print-length* nil *print-level* 8]
-    (let [[unclosed children] (unclosed-resources ast)]
-      (reduce into unclosed (mapv find-unclosed-resources children)))))
+  (let [[unclosed children] (unclosed-resources ast)]
+    (reduce into unclosed (mapv find-unclosed-resources children))))
 
 (defn closeable-warnings
   "Returns a vector of potentially unclosed (Auto)Closeable warnings. Warnings

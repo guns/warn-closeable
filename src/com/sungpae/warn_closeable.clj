@@ -44,25 +44,64 @@
       java.io.Closeable)))
 
 (def ^:dynamic *resource-free-closeables*
-  "Set of (Auto)Closeable classes that do not allocate OS resources.
-   cf. Eclipse: TypeConstants.JAVA_IO_RESOURCE_FREE_CLOSEABLES"
-  #{java.io.ByteArrayInputStream
-    java.io.ByteArrayOutputStream
-    java.io.CharArrayReader
-    java.io.CharArrayWriter
-    java.io.StringReader
-    java.io.StringWriter
-    java.io.StringBufferInputStream})
+  "Set of (Auto)Closeable class names that do not allocate OS resources.
+   cf. Eclipse: TypeConstants.JAVA_IO_RESOURCE_FREE_CLOSEABLES
+   Copyright (c) 2012, 2013 Eclipse Foundation and others."
+  #{"java.io.ByteArrayInputStream"
+    "java.io.ByteArrayOutputStream"
+    "java.io.CharArrayReader"
+    "java.io.CharArrayWriter"
+    "java.io.StringReader"
+    "java.io.StringWriter"
+    "java.io.StringBufferInputStream"
+    "java.util.stream.Stream"})
+
+(def ^:dynamic *closeable-wrappers*
+  "Set of (Auto)Closeable class names that wrap other resources.
+   cf. Eclipse: TypeConstants.JAVA_IO_WRAPPER_CLOSEABLES, etc.
+   Copyright (c) 2012, 2013 Eclipse Foundation and others."
+  #{"java.io.BufferedInputStream"
+    "java.io.BufferedOutputStream"
+    "java.io.BufferedReader"
+    "java.io.BufferedWriter"
+    "java.io.InputStreamReader"
+    "java.io.PrintWriter"
+    "java.io.LineNumberReader"
+    "java.io.DataInputStream"
+    "java.io.DataOutputStream"
+    "java.io.ObjectInputStream"
+    "java.io.ObjectOutputStream"
+    "java.io.FilterInputStream"
+    "java.io.FilterOutputStream"
+    "java.io.PushbackInputStream"
+    "java.io.SequenceInputStream"
+    "java.io.PrintStream"
+    "java.io.PushbackReader"
+    "java.io.OutputStreamWriter"
+    "java.util.zip.GZIPInputStream"
+    "java.util.zip.InflaterInputStream"
+    "java.util.zip.DeflaterInputStream"
+    "java.util.zip.CheckedInputStream"
+    "java.util.zip.ZipInputStream"
+    "java.util.jar.JarInputStream"
+    "java.util.zip.GZIPOutputStream"
+    "java.util.zip.InflaterOutputStream"
+    "java.util.zip.DeflaterOutputStream"
+    "java.util.zip.CheckedOutputStream"
+    "java.util.zip.ZipOutputStream"
+    "java.util.jar.JarOutputStream"
+    "java.security.DigestInputStream"
+    "java.security.DigestOutputStream"
+    "java.beans.XMLEncoder"
+    "java.beans.XMLDecoder"
+    "javax.sound.sampled.AudioInputStream"})
 
 (def ^:dynamic *system-resource-forms*
-  "Set of hash values for forms that are known to return global
-   (Auto)Closeable resources that should not be closed."
+  "Set of forms that are known to return global (Auto)Closeable resources that
+   should not be closed."
   (set
-    (for [form `[(System/in)
-                 (System/out)
-                 (System/err)
-                 (ClassLoader/getSystemClassLoader)]]
-      (hash (str (macroexpand form))))))
+    (for [form `[(ClassLoader/getSystemClassLoader)]]
+      (str (macroexpand form)))))
 
 (defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
@@ -86,14 +125,28 @@
            ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
        ~g)))
 
+(defn- whitelisted-closeable? [ast]
+  (let [{:keys [class o-tag tag op form]} ast
+        ;; TODO: Investigate :tag vs :o-tag vs :class
+        cls (case op
+              :invoke (or tag o-tag class)
+              (or class o-tag tag))
+        class-name (.getCanonicalName ^Class cls)]
+    (if (contains? *closeable-wrappers* class-name)
+      (case op
+        (:new :invoke) (every? whitelisted-closeable? (:args ast))
+        false)
+      (or
+        (contains? *resource-free-closeables* class-name)
+        (contains? *system-resource-forms* (str form))))))
+
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
-  (let [{:keys [tag form]} ast]
+  (let [{:keys [tag]} ast]
     (and (class? tag)
-         (not (contains? *resource-free-closeables* tag))
          (.isAssignableFrom BASE-INTERFACE tag)
-         (not (contains? *system-resource-forms* (hash (str form)))))))
+         (not (whitelisted-closeable? ast)))))
 
 (defn- closeable-call?
   "Is this a fn or interop call that returns an (Auto)Closeable object?"

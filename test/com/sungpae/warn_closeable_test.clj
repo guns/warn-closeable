@@ -123,17 +123,24 @@
                (.close rd₃))))))"
     []))
 
-(deftest test-closeable-nops
+(deftest test-closeable-whitelist
   (has-warnings
-    "(ns example)
-     (defn foo [^String s]
-       (let [bais (java.io.ByteArrayInputStream (.getBytes s))
-             baos (java.io.ByteArrayOutputStream.)
-             cr (java.io.CharArrayReader. (char-array s))
-             cw (java.io.CharArrayWriter.)
+    "(ns example
+       (:import (java.net URLClassLoader)))
+     (defn ^java.io.BufferedReader foo [^String s]
+       (java.io.BufferedReader. s))
+     (defn bar [^String s]
+       (let [_ (java.io.ByteArrayInputStream (.getBytes s))
+             _ (java.io.ByteArrayOutputStream.)
+             _ (java.io.CharArrayReader. (char-array s))
+             _ (java.io.CharArrayWriter.)
              sr (java.io.StringReader. s)
-             sw (java.io.StringWriter.)]
-         [bais baos cr cw sr sw]))"
+             _ (java.io.StringWriter.)
+             _ ^URLClassLoader (ClassLoader/getSystemClassLoader)
+             _ (java.io.BufferedReader. (java.io.StringReader. s))
+             _ (java.io.BufferedReader. sr)
+             _ (foo sr)]
+         true))"
     []))
 
 (deftest test-closeable-immediate-close
@@ -185,15 +192,6 @@
       :type :reflection
       :line 11
       :message "reference to field or no args method call read cannot be resolved"}]))
-
-(deftest test-closeable-global-resources
-  (has-warnings
-    "(ns example
-       (:import (java.net URL URLClassLoader URLDecoder)))
-     (defn- classpath []
-       (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
-         (URLDecoder/decode (.getPath url) \"UTF-8\")))"
-    []))
 
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding

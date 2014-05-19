@@ -32,18 +32,20 @@
 (deftest test-closeable-invoke
   (has-warnings
     "(ns example)
-     (defn foo [x] (clojure.java.io/input-stream x))"
+     (defn foo [x]
+       (hash (clojure.java.io/input-stream x)))"
     [{:ns 'example
-      :line 2
+      :line 3
       :form '(clojure.java.io/input-stream x)
       :class java.io.InputStream}]))
 
 (deftest test-closeable-new
   (has-warnings
     "(ns example)
-     (defn foo [x] (java.net.Socket.))"
+     (defn foo [x]
+       (hash (java.net.Socket.)))"
     [{:ns 'example
-      :line 2
+      :line 3
       :form '(new java.net.Socket)
       :class java.net.Socket}]))
 
@@ -52,10 +54,11 @@
     "(ns example
        (:import (java.nio.file Files StandardOpenOption)))
      (defn foo [^java.io.File file]
-       (Files/newByteChannel
-         (.toPath file) (make-array StandardOpenOption 0)))"
+       (.size
+         (Files/newByteChannel
+           (.toPath file) (make-array StandardOpenOption 0))))"
     [{:ns 'example
-      :line 4
+      :line 5
       :form '(. java.nio.file.Files (newByteChannel (.toPath file) (make-array StandardOpenOption 0)))
       :class java.nio.channels.SeekableByteChannel}]))
 
@@ -154,6 +157,23 @@
     [{:ns 'example
       :line 3
       :message "reference to field or no args method call getInputStream cannot be resolved"}]))
+
+(deftest test-closeable-returns-resource
+  (has-warnings
+    "(ns example)
+     (defn ^java.io.FileInputStream foo [^String x]
+       (java.io.FileInputStream. x))
+     (defn ^java.io.BufferedReader bar
+       ([^String x] (bar x nil))
+       ([^String x ^String y]
+        (clojure.java.io/reader
+          (clojure.java.io/file x y))))
+     (defn baz [^String x]
+       (.read (foo (bar x))))"
+    [{:ns 'example
+      :line 10
+      :form '(foo (bar x))
+      :class java.io.FileInputStream}]))
 
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding

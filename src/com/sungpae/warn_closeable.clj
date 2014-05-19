@@ -62,13 +62,18 @@
     (jvm/analyze form (jvm/empty-env))))
 
 (defn- closeable?
-  "Is this a fn or interop call that returns an (Auto)Closeable object?"
+  "Is this an (Auto)Closeable object?"
   [ast]
-  (let [{:keys [op tag]} ast]
-    (and (contains? #{:invoke :new :static-call :instance-call} op)
-         (class? tag)
+  (let [{:keys [tag]} ast]
+    (and (class? tag)
          (not (contains? *resource-free-closeables* tag))
          (.isAssignableFrom BASE-INTERFACE tag))))
+
+(defn- closeable-call?
+  "Is this a fn or interop call that returns an (Auto)Closeable object?"
+  [ast]
+  (and (contains? #{:invoke :new :static-call :instance-call} (:op ast))
+       (closeable? ast)))
 
 (defn- closing-call?
   "Is this a .close interop call on a local binding or a fn/method that
@@ -78,7 +83,7 @@
        (= 'close (:method ast))
        (let [inst (:instance ast)]
          (or (= :local (:op inst))
-             (closeable? inst)))))
+             (closeable-call? inst)))))
 
 (defn- instance-form [ast]
   (-> ast :instance :form))
@@ -107,14 +112,14 @@
   "Return a vector of binding nodes in :bindings that do not have a paired
    closing call in the :body node."
   [ast]
-  (filterv #(and (closeable? (:init %))
+  (filterv #(and (closeable-call? (:init %))
                  (not (closed-in-scope? % ast)))
            (:bindings ast)))
 
 (defn- non-closeable-bindings
   "Return a vector on binding nodes that do not bind (Auto)Closeable calls."
   [ast]
-  (filterv (comp not closeable? :init) (:bindings ast)))
+  (filterv (comp not closeable-call? :init) (:bindings ast)))
 
 (defn- unclosed-resources
   "Return a tuple of:
@@ -123,11 +128,18 @@
    * Child nodes that should be investigated."
   [ast]
   (cond
+    ;; Check local bindings and do not recurse into unclosed values
     (contains? #{:let :loop} (:op ast)) [(unclosed-bindings ast)
-                                         (conj (non-closeable-bindings ast)
-                                               (:body ast))]
-    (closeable? ast) [[ast] []]
-    (closing-call? ast) []
+                                         (conj (non-closeable-bindings ast) (:body ast))]
+    ;; Ignore function bodies that return resources
+    (= :fn-method (:op ast)) (if (closeable? (:body ast))
+                               [[] []]
+                               [[] (ast/children ast)])
+    ;; Mark resources created outside of a local binding as unclosed
+    (closeable-call? ast) [[ast] []]
+    ;; Do not recurse into the inner form of a .close call
+    (closing-call? ast) [[] []]
+    ;; Otherwise recurse into all child nodes
     :else [[] (ast/children ast)]))
 
 (defn- find-unclosed-resources

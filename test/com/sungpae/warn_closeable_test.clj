@@ -182,6 +182,15 @@
       :line 10
       :message "reference to field or no args method call read cannot be resolved"}]))
 
+(deftest test-closeable-global-resources
+  (has-warnings
+    "(ns example
+       (:import (java.net URL URLClassLoader URLDecoder)))
+     (defn- classpath []
+       (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
+         (URLDecoder/decode (.getPath url) \"UTF-8\")))"
+    []))
+
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding
 ;   (has-warnings

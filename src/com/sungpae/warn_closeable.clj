@@ -54,6 +54,16 @@
     java.io.StringWriter
     java.io.StringBufferInputStream})
 
+(def ^:dynamic *system-resource-forms*
+  "Set of hash values for forms that are known to return global
+   (Auto)Closeable resources that should not be closed."
+  (set
+    (for [form `[(System/in)
+                 (System/out)
+                 (System/err)
+                 (ClassLoader/getSystemClassLoader)]]
+      (hash (str (macroexpand form))))))
+
 (defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
             ana/create-var    jvm/create-var
@@ -69,10 +79,11 @@
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
-  (let [{:keys [tag]} ast]
+  (let [{:keys [tag form]} ast]
     (and (class? tag)
          (not (contains? *resource-free-closeables* tag))
-         (.isAssignableFrom BASE-INTERFACE tag))))
+         (.isAssignableFrom BASE-INTERFACE tag)
+         (not (contains? *system-resource-forms* (hash (str form)))))))
 
 (defn- closeable-call?
   "Is this a fn or interop call that returns an (Auto)Closeable object?"

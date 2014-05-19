@@ -71,11 +71,6 @@
             ana/var?          var?]
     (jvm/analyze form (jvm/empty-env))))
 
-(defn- subtype-of? [^Class cls ^Class base]
-  (and (class? cls)
-       (class? base)
-       (.isAssignableFrom base cls)))
-
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
@@ -149,7 +144,7 @@
     (reduce
       (fn [[unclosed errors children] fn-method]
         (if (closeable? (:body fn-method))
-          (if (subtype-of? deftag (:tag (:body fn-method)))
+          (if (= deftag (:tag (:body fn-method)))
             [unclosed errors children]
             (let [args (:arglist fn-method)
                   e {:ns (ns-name *ns*)

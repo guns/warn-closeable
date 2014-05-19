@@ -162,7 +162,7 @@
     "(ns example)
      (defn foo [^String x]
        (java.io.FileInputStream. x))
-     (defn ^java.io.BufferedReader bar
+     (defn ^java.io.Reader bar
        ([^String x] (bar x nil))
        ([^String x ^String y]
         (clojure.java.io/reader
@@ -172,7 +172,7 @@
     [{:ns 'example
       :line 10
       :form '(bar x)
-      :class java.io.BufferedReader}]
+      :class java.io.Reader}]
     [{:ns 'example
       :type :reflection
       :line 2

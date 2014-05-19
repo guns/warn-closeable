@@ -207,10 +207,9 @@
 
 (defn- lint-defn [ast]
   (let [defname (:name ast)
-        deftag (or (-> ast :meta :val :tag)
-                   (-> ast :meta :form :tag))
-        ^Class deftag (cond->* deftag
-                        (symbol? deftag) (resolve deftag))
+        ^Class deftag (or (-> ast :meta :val :tag)
+                          (when-let [sym (-> ast :meta :form :tag)]
+                            (resolve sym)))
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[unclosed errors children] fn-method]

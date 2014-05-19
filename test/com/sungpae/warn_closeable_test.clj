@@ -153,14 +153,14 @@
        (boolean (.getInputStream x)))"
     []
     [{:ns 'example
-      :line 3
       :type :reflection
+      :line 3
       :message "reference to field or no args method call getInputStream cannot be resolved"}]))
 
 (deftest test-closeable-returns-resource
   (has-warnings
     "(ns example)
-     (defn ^java.io.FileInputStream foo [^String x]
+     (defn foo [^String x]
        (java.io.FileInputStream. x))
      (defn ^java.io.BufferedReader bar
        ([^String x] (bar x nil))
@@ -171,8 +171,16 @@
        (.read (foo (bar x))))"
     [{:ns 'example
       :line 10
-      :form '(foo (bar x))
-      :class java.io.FileInputStream}]))
+      :form '(bar x)
+      :class java.io.BufferedReader}]
+    [{:ns 'example
+      :type :reflection
+      :line 2
+      :message "fn-method `foo [x]` missing type hint ^java.io.FileInputStream"}
+     {:ns 'example
+      :type :reflection
+      :line 10
+      :message "reference to field or no args method call read cannot be resolved"}]))
 
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding

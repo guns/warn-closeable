@@ -27,6 +27,7 @@
          (.generateCertificates (CertificateFactory/getInstance \"X.509\") input)))
    "
   (:require [clojure.java.io :as io]
+            [clojure.reflect :refer [type-reflect]]
             [clojure.string :as string]
             [clojure.tools.analyzer :as ana]
             [clojure.tools.analyzer.ast :as ast]
@@ -36,65 +37,81 @@
            (java.io File PrintWriter StringWriter)
            (java.net URL URLClassLoader URLDecoder)))
 
+(defn- ^Class try-resolve [class-name]
+  (try
+    (Class/forName class-name)
+    (catch ClassNotFoundException _)))
+
 (def ^:private ^Class BASE-INTERFACE
   "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."
-  (try
-    (Class/forName "java.lang.AutoCloseable")
-    (catch ClassNotFoundException _
-      java.io.Closeable)))
+  (or (try-resolve "java.lang.AutoCloseable")
+      java.io.Closeable))
 
 (def ^:dynamic *resource-free-closeables*
-  "Set of (Auto)Closeable class names that do not allocate OS resources.
+  "Set of (Auto)Closeable classes that do not allocate OS resources.
+
    cf. Eclipse: TypeConstants.JAVA_IO_RESOURCE_FREE_CLOSEABLES
    Copyright (c) 2012, 2013 Eclipse Foundation and others."
-  #{"java.io.ByteArrayInputStream"
-    "java.io.ByteArrayOutputStream"
-    "java.io.CharArrayReader"
-    "java.io.CharArrayWriter"
-    "java.io.StringReader"
-    "java.io.StringWriter"
-    "java.io.StringBufferInputStream"
-    "java.util.stream.Stream"})
+  (reduce
+    (fn [s k] (if-let [c (try-resolve k)] (conj s c) s))
+    #{} ["java.io.ByteArrayInputStream"
+         "java.io.ByteArrayOutputStream"
+         "java.io.CharArrayReader"
+         "java.io.CharArrayWriter"
+         "java.io.StringReader"
+         "java.io.StringWriter"
+         "java.io.StringBufferInputStream"
+         "java.util.stream.Stream"]))
 
 (def ^:dynamic *closeable-wrappers*
-  "Set of (Auto)Closeable class names that wrap other resources.
+  "(Auto)Closeable classes that wrap other resources, mapped to a sequence of
+   their constructor parameter types.
+
    cf. Eclipse: TypeConstants.JAVA_IO_WRAPPER_CLOSEABLES, etc.
    Copyright (c) 2012, 2013 Eclipse Foundation and others."
-  #{"java.io.BufferedInputStream"
-    "java.io.BufferedOutputStream"
-    "java.io.BufferedReader"
-    "java.io.BufferedWriter"
-    "java.io.InputStreamReader"
-    "java.io.PrintWriter"
-    "java.io.LineNumberReader"
-    "java.io.DataInputStream"
-    "java.io.DataOutputStream"
-    "java.io.ObjectInputStream"
-    "java.io.ObjectOutputStream"
-    "java.io.FilterInputStream"
-    "java.io.FilterOutputStream"
-    "java.io.PushbackInputStream"
-    "java.io.SequenceInputStream"
-    "java.io.PrintStream"
-    "java.io.PushbackReader"
-    "java.io.OutputStreamWriter"
-    "java.util.zip.GZIPInputStream"
-    "java.util.zip.InflaterInputStream"
-    "java.util.zip.DeflaterInputStream"
-    "java.util.zip.CheckedInputStream"
-    "java.util.zip.ZipInputStream"
-    "java.util.jar.JarInputStream"
-    "java.util.zip.GZIPOutputStream"
-    "java.util.zip.InflaterOutputStream"
-    "java.util.zip.DeflaterOutputStream"
-    "java.util.zip.CheckedOutputStream"
-    "java.util.zip.ZipOutputStream"
-    "java.util.jar.JarOutputStream"
-    "java.security.DigestInputStream"
-    "java.security.DigestOutputStream"
-    "java.beans.XMLEncoder"
-    "java.beans.XMLDecoder"
-    "javax.sound.sampled.AudioInputStream"})
+  (reduce
+    (fn [m k]
+      (if-let [c (try-resolve k)]
+        (assoc m c (->> (type-reflect c)
+                        :members
+                        (filter #(= (:name %) (symbol (.getCanonicalName c))))
+                        (map :parameter-types)))
+        m))
+    {} ["java.io.BufferedInputStream"
+        "java.io.BufferedOutputStream"
+        "java.io.BufferedReader"
+        "java.io.BufferedWriter"
+        "java.io.InputStreamReader"
+        "java.io.PrintWriter"
+        "java.io.LineNumberReader"
+        "java.io.DataInputStream"
+        "java.io.DataOutputStream"
+        "java.io.ObjectInputStream"
+        "java.io.ObjectOutputStream"
+        "java.io.FilterInputStream"
+        "java.io.FilterOutputStream"
+        "java.io.PushbackInputStream"
+        "java.io.SequenceInputStream"
+        "java.io.PrintStream"
+        "java.io.PushbackReader"
+        "java.io.OutputStreamWriter"
+        "java.util.zip.GZIPInputStream"
+        "java.util.zip.InflaterInputStream"
+        "java.util.zip.DeflaterInputStream"
+        "java.util.zip.CheckedInputStream"
+        "java.util.zip.ZipInputStream"
+        "java.util.jar.JarInputStream"
+        "java.util.zip.GZIPOutputStream"
+        "java.util.zip.InflaterOutputStream"
+        "java.util.zip.DeflaterOutputStream"
+        "java.util.zip.CheckedOutputStream"
+        "java.util.zip.ZipOutputStream"
+        "java.util.jar.JarOutputStream"
+        "java.security.DigestInputStream"
+        "java.security.DigestOutputStream"
+        "java.beans.XMLEncoder"
+        "java.beans.XMLDecoder"
+        "javax.sound.sampled.AudioInputStream"]))
 
 (def ^:dynamic *system-resource-forms*
   "Set of forms that are known to return global (Auto)Closeable resources that
@@ -130,14 +147,13 @@
         ;; TODO: Investigate :tag vs :o-tag vs :class
         cls (case op
               :invoke (or tag o-tag class)
-              (or class o-tag tag))
-        class-name (.getCanonicalName ^Class cls)]
-    (if (contains? *closeable-wrappers* class-name)
+              (or class o-tag tag))]
+    (if (contains? *closeable-wrappers* cls)
       (case op
         (:new :invoke) (every? whitelisted-closeable? (:args ast))
         false)
       (or
-        (contains? *resource-free-closeables* class-name)
+        (contains? *resource-free-closeables* cls)
         (contains? *system-resource-forms* (str form))))))
 
 (defn- closeable?

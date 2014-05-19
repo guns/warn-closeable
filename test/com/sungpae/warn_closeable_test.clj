@@ -2,13 +2,12 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as string]
             [clojure.test :refer [deftest is testing]]
-            [com.sungpae.warn-closeable :refer [closeable-warnings
-                                                with-reflection-warnings]]))
+            [com.sungpae.warn-closeable :refer [closeable-warnings]]))
 
 (defn has-warnings
-  ([clj-string c-warnings]
-   (has-warnings clj-string c-warnings nil))
-  ([clj-string c-warnings r-warnings]
+  ([clj-string warnings]
+   (has-warnings clj-string warnings []))
+  ([clj-string warnings errors]
    (let [name (second (read-string clj-string))
          path (->> (str name)
                    (replace {\- \_ \. \/})
@@ -21,10 +20,9 @@
        (binding [*warn-on-reflection* false]
          (require name :reload))
        (let [ns (find-ns name)
-             [rs cs] (with-reflection-warnings ns
-                       (closeable-warnings ns))]
-         (is (= (form-str cs) (form-str c-warnings)))
-         (when (seq r-warnings) (is (= rs r-warnings))))
+             [ws es] (closeable-warnings ns)]
+         (is (= (form-str ws) (form-str warnings)))
+         (is (= es errors)))
        (finally
          (remove-ns name)
          (io/delete-file path :silently true))))))
@@ -156,6 +154,7 @@
     []
     [{:ns 'example
       :line 3
+      :type :reflection
       :message "reference to field or no args method call getInputStream cannot be resolved"}]))
 
 (deftest test-closeable-returns-resource

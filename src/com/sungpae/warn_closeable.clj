@@ -148,40 +148,89 @@
   (let [[unclosed children] (unclosed-resources ast)]
     (reduce into unclosed (mapv find-unclosed-resources children))))
 
-(defn closeable-warnings
-  "Returns a vector of potentially unclosed (Auto)Closeable warnings. Warnings
-   are PersistentArrayMaps with :ns, :line, :form, and :class entries.
+(defn- ^LineNumberingPushbackReader namespace-reader [ns]
+  (->> (str ns)
+       (replace {\. \/ \- \_})
+       string/join
+       (format "%s.clj")
+       io/resource
+       io/reader
+       LineNumberingPushbackReader.))
 
-   Since the analyzer may miss (Auto)Closeable objects when reflection is
-   used, the *warn-on-reflection* is bound to true during linting."
-  [^Namespace ns]
-  (binding [*warn-on-reflection* true
-            *ns* ns]
-    (with-open [rdr (->> (str ns)
-                         (replace {\. \/ \- \_})
-                         string/join
-                         (format "%s.clj")
-                         io/resource
-                         io/reader
-                         LineNumberingPushbackReader.)]
-      (let [form (take-while (partial not= ::done)
-                             (repeatedly #(read rdr false ::done)))
-            errors (find-unclosed-resources (analyze form))]
-        (vec
-          (for [ast errors
-                :let [{:keys [form tag env]} ast
-                      {:keys [ns line]} env
-                      value (-> ast :init :form)]]
-            (array-map :ns ns
-                       :line line
-                       :form (if value [form value] form)
-                       :class tag)))))))
+(defmacro ^:private with-reflection-warnings [& body]
+  `(let [sw# (new ~StringWriter)
+         v# (binding [*warn-on-reflection* true
+                      *out* (new ~PrintWriter sw#)]
+              (do ~@body))
+         ws# (->> (str sw#)
+                  ~string/split-lines
+                  (filterv #(.startsWith ^String % "Reflection warning")))]
+     [ws# v#]))
+
+(defn- read-forms [rdr]
+  (vec
+    (take-while (partial not= ::done)
+                (repeatedly #(read rdr false ::done)))))
+
+(defn closeable-warnings
+  "Detect potentially unclosed (Auto)Closeable objects.
+
+   Returns a tuple of:
+
+   * Unclosed resource warnings:
+
+     [{:ns Symbol
+       :line Int
+       :form Sexp
+       :class Class}]
+
+   * Reflection warnings and other errors:
+
+     [{:ns Symbol
+       :type Keyword
+       :line (maybe Int)
+       :form (maybe Sexp)
+       :class (maybe Class)
+       :message String}]
+   "
+  [^Namespace namespace]
+  (binding [*ns* namespace]
+    (with-open [rdr (namespace-reader namespace)]
+      (let [ns-sym (ns-name namespace)]
+        (try
+          (let [[rs nodes] (with-reflection-warnings
+                             (find-unclosed-resources (analyze (read-forms rdr))))
+                ws (for [ast nodes
+                         :let [{:keys [form tag env]} ast
+                               {:keys [ns line]} env
+                               value (-> ast :init :form)]]
+                     {:ns ns
+                      :line line
+                      :form (if value [form value] form)
+                      :class tag})
+                es (for [r rs
+                         :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
+                     {:ns ns-sym
+                      :line (Long/parseLong l)
+                      :type :reflection
+                      :message m})]
+            [(vec ws) (vec es)])
+          (catch ExceptionInfo e
+            (let [{:keys [line class ast]} (.data e)]
+              [[] [{:ns ns-sym
+                    :line line
+                    :form (:form ast)
+                    :class class
+                    :message (.getMessage e)}]]))
+          (catch Throwable e
+            [[] [{:ns ns-sym
+                  :message (str e)}]]))))))
 
 (defn- classpath []
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
-(defn ^:internal project-namespace-symbols
+(defn ^:private project-namespace-symbols
   "Extract a sequence of ns symbols in *.clj files from a collection of
    paths, which may be a mix of files or directories, and may be any type
    implementing clojure.java.io/Coercions. If no paths are given, the entire
@@ -196,28 +245,42 @@
                       (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
         find-namespaces)))
 
-(defmacro ^:internal with-reflection-warnings [ns & body]
-  `(let [sw# (new ~StringWriter)
-         v# (binding [*warn-on-reflection* true
-                      *out* (new ~PrintWriter sw#)]
-              (do ~@body))
-         ws# (->> (str sw#)
-                  ~string/split-lines
-                  (filterv #(.startsWith ^String % "Reflection warning"))
-                  (mapv #(let [[_# l# m#] (re-find #"\S+:(\d+):[\d\s]*- (.*)" %)]
-                           (array-map :ns (ns-name ~ns)
-                                      :line (Long/parseLong l#)
-                                      :message m#))))]
-     [ws# v#]))
+;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
+(defmacro ^:private cond->*
+  "Takes an expression and a set of test/form pairs. Threads expr (via ->)
+   through each form for which the corresponding test
+   expression is true. Note that, unlike cond branching, cond-> threading does
+   not short circuit after the first true test expression."
+  {:added "1.5"}
+  [expr & clauses]
+  (assert (even? (count clauses)))
+  (let [g (gensym)
+        pstep (fn [[test step]] `(if ~test (-> ~g ~step) ~g))]
+    `(let [~g ~expr
+           ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
+       ~g)))
 
-(defn- print-reflection-warnings! [r-warnings]
-  (doseq [[ns ws] (group-by :ns r-warnings)]
-    (printf "[%s] REFLECTION WARNINGS:\n" ns)
-    (doseq [{:keys [line message]} ws]
-      (printf "  %d: %s\n" line message))))
+(defn- print-error-line! [error]
+  (let [{:keys [line message form class]} error
+        sb (cond->* (StringBuilder. "  ")
+             line (.append (str line ": "))
+             message (.append (str message " "))
+             form (.append (str form " "))
+             class (.append (str \[ class \])))]
+    (println (str sb))))
 
-(defn- print-closeable-warnings! [c-warnings]
-  (doseq [[ns ws] (group-by :ns c-warnings)]
+(defn- print-errors! [errors]
+  (doseq [[ns ws] (group-by :ns errors)]
+    (let [{rs :reflection es nil} (group-by :type ws)]
+      (when (seq es)
+        (printf "[%s] ERRORS:\n" ns)
+        (doseq [e es] (print-error-line! e)))
+      (when (seq rs)
+        (printf "[%s] REFLECTION WARNINGS:\n" ns)
+        (doseq [r rs] (print-error-line! r))))))
+
+(defn- print-unclosed-warnings! [u-warnings]
+  (doseq [[ns ws] (group-by :ns u-warnings)]
     (printf "[%s] Possibly unclosed (Auto)Closeable resources:\n" ns)
     (doseq [{:keys [line form class]} ws]
       (printf "  %d: %s [%s]\n" line form class))))
@@ -232,22 +295,12 @@
   ([]
    (apply warn-closeable! (project-namespace-symbols)))
   ([& ns-syms]
-   (binding [*warn-on-reflection* false]
-     (doseq [ns-sym ns-syms]
-       (try
-         (require ns-sym)
-         (let [ns (find-ns ns-sym)
-               [rs cs] (with-reflection-warnings ns
-                         (closeable-warnings ns))]
-           (print-reflection-warnings! rs)
-           (print-closeable-warnings! cs))
-         (catch ExceptionInfo e
-           (let [{:keys [column line class ast]} (.data e)]
-             (prn (array-map :ns ns-sym
-                             :error (.getMessage e)
-                             :line line
-                             :column column
-                             :form (:form ast)
-                             :class class))))
-         (catch Throwable e
-           (printf "[%s] %s\n" ns-sym e)))))))
+   (doseq [ns-sym ns-syms]
+     (try
+       (binding [*warn-on-reflection* false]
+         (require ns-sym))
+       (let [[warnings errors] (closeable-warnings (find-ns ns-sym))]
+         (print-errors! errors)
+         (print-unclosed-warnings! warnings))
+       (catch Throwable e
+         (printf "ERROR: %s\n" e))))))

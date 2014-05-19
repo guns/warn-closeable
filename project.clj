@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/tools.namespace "0.2.4"]
                  [org.clojure/tools.analyzer "0.1.0-beta13"]
                  [org.clojure/tools.analyzer.jvm "0.1.0-beta13"]]
-  :profiles {:dev {:dependencies [[org.clojure/clojure "1.4.0"]]}})
+  :profiles {:dev {:dependencies [[org.clojure/clojure "1.4.0"]
+                                  [prismatic/schema "0.2.2"]]}})

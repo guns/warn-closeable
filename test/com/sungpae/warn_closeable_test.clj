@@ -159,7 +159,8 @@
 
 (deftest test-closeable-returns-resource
   (has-warnings
-    "(ns example)
+    "(ns example
+       (:require [schema.core :as s]))
      (defn foo [^String x]
        (java.io.FileInputStream. x))
      (defn ^java.io.Reader bar
@@ -168,18 +169,21 @@
         (clojure.java.io/reader
           (clojure.java.io/file x y))))
      (defn baz [^String x]
-       (.read (foo (bar x))))"
+       (.read (foo (bar x))))
+     (s/defn console-reader :- java.io.BufferedReader
+       []
+       (java.io.BufferedReader. (java.io.InputStreamReader. System/in \"UTF-8\")))"
     [{:ns 'example
-      :line 10
+      :line 11
       :form '(bar x)
       :class java.io.Reader}]
     [{:ns 'example
       :type :reflection
-      :line 2
+      :line 3
       :message "fn-method `foo [x]` missing type hint ^java.io.FileInputStream"}
      {:ns 'example
       :type :reflection
-      :line 10
+      :line 11
       :message "reference to field or no args method call read cannot be resolved"}]))
 
 (deftest test-closeable-global-resources

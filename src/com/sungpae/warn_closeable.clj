@@ -71,6 +71,21 @@
             ana/var?          var?]
     (jvm/analyze form (jvm/empty-env))))
 
+;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
+(defmacro ^:private cond->*
+  "Takes an expression and a set of test/form pairs. Threads expr (via ->)
+   through each form for which the corresponding test
+   expression is true. Note that, unlike cond branching, cond-> threading does
+   not short circuit after the first true test expression."
+  {:added "1.5"}
+  [expr & clauses]
+  (assert (even? (count clauses)))
+  (let [g (gensym)
+        pstep (fn [[test step]] `(if ~test (-> ~g ~step) ~g))]
+    `(let [~g ~expr
+           ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
+       ~g)))
+
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
@@ -139,7 +154,10 @@
 
 (defn- lint-defn [ast]
   (let [defname (:name ast)
-        ^Class deftag (-> ast :meta :val :tag)
+        deftag (or (-> ast :meta :val :tag)
+                   (-> ast :meta :form :tag))
+        ^Class deftag (cond->* deftag
+                        (symbol? deftag) (resolve deftag))
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[unclosed errors children] fn-method]
@@ -292,21 +310,6 @@
                   (or (.isDirectory f)
                       (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
         find-namespaces)))
-
-;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
-(defmacro ^:private cond->*
-  "Takes an expression and a set of test/form pairs. Threads expr (via ->)
-   through each form for which the corresponding test
-   expression is true. Note that, unlike cond branching, cond-> threading does
-   not short circuit after the first true test expression."
-  {:added "1.5"}
-  [expr & clauses]
-  (assert (even? (count clauses)))
-  (let [g (gensym)
-        pstep (fn [[test step]] `(if ~test (-> ~g ~step) ~g))]
-    `(let [~g ~expr
-           ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
-       ~g)))
 
 (defn- print-error-line! [error]
   (let [{:keys [line message form class]} error

@@ -5,27 +5,25 @@
             [com.sungpae.warn-closeable :refer [closeable-warnings]]))
 
 (defn has-warnings
-  ([clj-string warnings]
-   (has-warnings clj-string warnings []))
-  ([clj-string warnings errors]
-   (let [name (second (read-string clj-string))
-         path (->> (str name)
-                   (replace {\- \_ \. \/})
-                   string/join
-                   (format "test/%s.clj"))
-         ;; List equality fails with :static-call forms
-         form-str (fn [coll] (mapv #(update-in % [:form] str) coll))]
-     (try
-       (spit path clj-string)
-       (binding [*warn-on-reflection* false]
-         (require name :reload))
-       (let [ns (find-ns name)
-             [ws es] (closeable-warnings ns)]
-         (is (= (form-str ws) (form-str warnings)))
-         (is (= es errors)))
-       (finally
-         (remove-ns name)
-         (io/delete-file path :silently true))))))
+  [clj-string warnings errors]
+  (let [name (second (read-string clj-string))
+        path (->> (str name)
+                  (replace {\- \_ \. \/})
+                  string/join
+                  (format "test/%s.clj"))
+        ;; List equality fails with :static-call forms
+        form-str (fn [coll] (mapv #(update-in % [:form] str) coll))]
+    (try
+      (spit path clj-string)
+      (binding [*warn-on-reflection* false]
+        (require name :reload))
+      (let [ns (find-ns name)
+            [ws es] (closeable-warnings ns)]
+        (is (= (form-str ws) (form-str warnings)))
+        (is (= es errors)))
+      (finally
+        (remove-ns name)
+        (io/delete-file path :silently true)))))
 
 (deftest test-closeable-invoke
   (has-warnings
@@ -35,7 +33,8 @@
     [{:ns 'example
       :line 3
       :form '(clojure.java.io/input-stream x)
-      :class java.io.InputStream}]))
+      :class java.io.InputStream}]
+    []))
 
 (deftest test-closeable-new
   (has-warnings
@@ -45,7 +44,8 @@
     [{:ns 'example
       :line 3
       :form '(new java.net.Socket)
-      :class java.net.Socket}]))
+      :class java.net.Socket}]
+    []))
 
 (deftest test-closeable-static-call
   (has-warnings
@@ -58,7 +58,8 @@
     [{:ns 'example
       :line 5
       :form '(. java.nio.file.Files (newByteChannel (.toPath file) (make-array StandardOpenOption 0)))
-      :class java.nio.channels.SeekableByteChannel}]))
+      :class java.nio.channels.SeekableByteChannel}]
+    []))
 
 (deftest test-closeable-instance-call
   (has-warnings
@@ -74,7 +75,8 @@
      {:ns 'example
       :line 3
       :form '[s (. ss accept)]
-      :class java.net.Socket}]))
+      :class java.net.Socket}]
+    []))
 
 (deftest test-closeable-multiple-bindings
   (has-warnings
@@ -92,7 +94,8 @@
      {:ns 'example
       :line 4
       :form '[wr (io/writer output)]
-      :class java.io.Writer}]))
+      :class java.io.Writer}]
+    []))
 
 (deftest test-closeable-nested-bindings
   (has-warnings
@@ -105,7 +108,8 @@
     [{:ns 'example
       :line 4
       :form '[rd (io/reader input)]
-      :class java.io.Reader}]))
+      :class java.io.Reader}]
+    []))
 
 (deftest test-closeable-ok
   (has-warnings
@@ -121,6 +125,7 @@
              (finally
                (.close rd₄)
                (.close rd₃))))))"
+    []
     []))
 
 (deftest test-closeable-whitelist
@@ -141,6 +146,7 @@
              _ (java.io.BufferedReader. sr)
              _ (foo sr)]
          true))"
+    []
     []))
 
 (deftest test-closeable-immediate-close
@@ -151,6 +157,7 @@
              proc (.exec (Runtime/getRuntime) cmd)]
          (.close (.getInputStream proc))
          proc))"
+    []
     []))
 
 (deftest test-closeable-pretty-reflection-errors

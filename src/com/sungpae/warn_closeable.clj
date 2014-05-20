@@ -47,6 +47,11 @@
   (or (try-resolve "java.lang.AutoCloseable")
       java.io.Closeable))
 
+(defn- closeable-class?
+  "Does this class implement (Auto)Closeable?"
+  [^Class cls]
+  (.isAssignableFrom BASE-INTERFACE cls))
+
 (def ^:dynamic *resource-free-closeables*
   "Set of (Auto)Closeable classes that do not allocate OS resources.
 
@@ -161,7 +166,7 @@
   [ast]
   (let [{:keys [tag]} ast]
     (and (class? tag)
-         (.isAssignableFrom BASE-INTERFACE tag)
+         (closeable-class? tag)
          (not (whitelisted-closeable? ast)))))
 
 (defn- closeable-call?
@@ -216,22 +221,27 @@
   [ast]
   (filterv (comp not closeable-call? :init) (:bindings ast)))
 
-(defn- lint-bindings [ast]
+(defn- lint-bindings
+  "unclosed-resources helper for :let and :loop nodes."
+  [ast]
   [(unclosed-bindings ast)
    []
    (conj (non-closeable-bindings ast) (:body ast))])
 
-(defn- lint-defn [ast]
+(defn- lint-defn
+  "unclosed-resources helper for :def nodes that wrap a :fn node. Only checks
+   for missing (Auto)Closeable type hints on the :def node."
+  [ast]
   (let [defname (:name ast)
         ^Class deftag (or (-> ast :meta :val :tag)
                           (when-let [sym (-> ast :meta :form :tag)]
                             (resolve sym)))
         fn-methods (-> ast :init :methods)]
     (reduce
-      (fn [[unclosed errors children] fn-method]
+      (fn [[_ errors children] fn-method]
         (if (closeable? (:body fn-method))
           (if (= deftag (:tag (:body fn-method)))
-            [unclosed errors children]
+            [_ errors children]
             (let [args (:arglist fn-method)
                   e {:ns (ns-name *ns*)
                      :type :reflection
@@ -242,8 +252,8 @@
                                           defname args ret)
                                   (format "fn-method `%s %s` tagged as %s, but returns %s"
                                           defname args (.getCanonicalName deftag) ret)))}]
-              [unclosed (conj errors e) children]))
-          [unclosed errors (conj children fn-method)]))
+              [[] (conj errors e) children]))
+          [[] errors (conj children fn-method)]))
       [[] [] [(:meta ast)]] fn-methods)))
 
 (defn- unclosed-resources
@@ -281,7 +291,9 @@
             (update-in [1] into (vs' 1))))
       [unclosed errors] (mapv find-unclosed-resources children))))
 
-(defn- ^LineNumberingPushbackReader namespace-reader [ns]
+(defn- ^LineNumberingPushbackReader namespace-reader
+  "Return a reader on the resource corresponding to ns."
+  [ns]
   (->> (str ns)
        (replace {\. \/ \- \_})
        string/join
@@ -290,7 +302,11 @@
        io/reader
        LineNumberingPushbackReader.))
 
-(defmacro ^:private with-reflection-warnings [& body]
+(defmacro ^:private with-reflection-warnings
+  "Execute body and return tuple of:
+   * Vector of reflection warning lines
+   * Return value of body"
+  [& body]
   `(let [sw# (new ~StringWriter)
          v# (binding [*warn-on-reflection* true
                       *out* (new ~PrintWriter sw#)]
@@ -360,7 +376,9 @@
             [[] [{:ns ns-sym
                   :message (str e)}]]))))))
 
-(defn- classpath []
+(defn- classpath
+  "System classpath as a sequence of string paths."
+  []
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
@@ -379,8 +397,11 @@
                       (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
         find-namespaces)))
 
-(defn- print-error-line! [error]
-  (let [{:keys [line message form class]} error
+(defn- print-error-line!
+  "Pretty print an error-map.
+   See closeable-warnings for the error-map schema."
+  [error-map]
+  (let [{:keys [line message form class]} error-map
         sb (cond->* (StringBuilder. "  ")
              line (.append (str line ": "))
              message (.append (str message " "))
@@ -388,8 +409,11 @@
              class (.append (str \[ class \])))]
     (println (str sb))))
 
-(defn- print-errors! [errors]
-  (doseq [[ns ws] (group-by :ns errors)]
+(defn- print-errors!
+  "Pretty print a sequence of error maps.
+   See closeable-warnings for the error-map schema."
+  [error-maps]
+  (doseq [[ns ws] (group-by :ns error-maps)]
     (let [{rs :reflection es nil} (group-by :type ws)]
       (when (seq es)
         (printf "[%s] ERRORS:\n" ns)
@@ -398,7 +422,10 @@
         (printf "[%s] REFLECTION WARNINGS:\n" ns)
         (doseq [r rs] (print-error-line! r))))))
 
-(defn- print-unclosed-warnings! [u-warnings]
+(defn- print-unclosed-warnings!
+  "Pretty print a sequence of unclosed resource warning maps.
+   See closeable-warnings for the warning map schema."
+  [u-warnings]
   (doseq [[ns ws] (group-by :ns u-warnings)]
     (printf "[%s] Possibly unclosed (Auto)Closeable resources:\n" ns)
     (doseq [{:keys [line form class]} ws]

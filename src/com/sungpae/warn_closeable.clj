@@ -142,8 +142,11 @@
    should not be closed."
   (set
     (for [form '[(. java.lang.System -in)
+                 (. java.lang.System in)
                  (. java.lang.System -out)
+                 (. java.lang.System out)
                  (. java.lang.System -err)
+                 (. java.lang.System err)
                  (. java.lang.ClassLoader getSystemClassLoader)]]
       (str form))))
 

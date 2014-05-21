@@ -142,11 +142,15 @@
              sr (java.io.StringReader. s)
              _ (java.io.StringWriter.)
              _ ^URLClassLoader (ClassLoader/getSystemClassLoader)
+             _ (java.io.PrintWriter. System/out true)
              _ (java.io.BufferedReader. (java.io.StringReader. s))
              _ (java.io.BufferedReader. sr)
-             _ (foo sr)]
+             _ (java.io.BufferedReader. (java.io.FileReader. s))]
          true))"
-    []
+    [{:ns 'example
+      :line 6
+      :form '[_ (new java.io.BufferedReader (java.io.FileReader. s))]
+      :class java.io.BufferedReader}]
     []))
 
 (deftest test-closeable-immediate-close

@@ -49,8 +49,28 @@
 
 (defn- closeable-class?
   "Does this class implement (Auto)Closeable?"
+  [cls]
+  (and (class? cls)
+       (.isAssignableFrom BASE-INTERFACE cls)))
+
+(defn- closeable-ctors
+  "Use reflection to return a map of parameter counts constructor param
+   vectors that include at least one (Auto)Closeable instance. The contents
+   of the param vectors should be considered boolean values: nil for
+   non-closeable, Class for closeable."
   [^Class cls]
-  (.isAssignableFrom BASE-INTERFACE cls))
+  (let [csym (symbol (.getCanonicalName cls))]
+    (->> (type-reflect cls)
+         :members
+         (filter #(and (= (:name %) csym)
+                       (contains? (:flags %) :public)))
+         (map (fn [c]
+                (mapv #(when-let [p (try-resolve (str %))]
+                         (when (closeable-class? p)
+                           p))
+                      (:parameter-types c))))
+         (filter (partial some identity))
+         (reduce (fn [m params] (assoc m (count params) params)) {}))))
 
 (def ^:dynamic *resource-free-closeables*
   "Set of (Auto)Closeable classes that do not allocate OS resources.
@@ -69,20 +89,19 @@
          "java.util.stream.Stream"]))
 
 (def ^:dynamic *closeable-wrappers*
-  "(Auto)Closeable classes that wrap other resources, mapped to a sequence of
-   their constructor parameter types.
+  "Map of (Auto)Closeable classes that wrap other resources.
+
+     Returns: {Class {Int [closeable-ctor-params]}}
 
    cf. Eclipse: TypeConstants.JAVA_IO_WRAPPER_CLOSEABLES, etc.
    Copyright (c) 2012, 2013 Eclipse Foundation and others."
   (reduce
     (fn [m k]
       (if-let [c (try-resolve k)]
-        (assoc m c (->> (type-reflect c)
-                        :members
-                        (filter #(= (:name %) (symbol (.getCanonicalName c))))
-                        (map :parameter-types)))
+        (assoc m c (closeable-ctors c))
         m))
-    {} ["java.io.BufferedInputStream"
+    {} ["clojure.lang.LineNumberingPushbackReader"
+        "java.io.BufferedInputStream"
         "java.io.BufferedOutputStream"
         "java.io.BufferedReader"
         "java.io.BufferedWriter"
@@ -122,8 +141,11 @@
   "Set of forms that are known to return global (Auto)Closeable resources that
    should not be closed."
   (set
-    (for [form `[(ClassLoader/getSystemClassLoader)]]
-      (str (macroexpand form)))))
+    (for [form '[(. java.lang.System -in)
+                 (. java.lang.System -out)
+                 (. java.lang.System -err)
+                 (. java.lang.ClassLoader getSystemClassLoader)]]
+      (str form))))
 
 (defn- analyze [form]
   (binding [ana/macroexpand-1 jvm/macroexpand-1
@@ -147,15 +169,45 @@
            ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
        ~g)))
 
-(defn- whitelisted-closeable? [ast]
-  (let [{:keys [class o-tag tag op form]} ast
-        ;; TODO: Investigate :tag vs :o-tag vs :class
-        cls (case op
-              :invoke (or tag o-tag class)
-              (or class o-tag tag))]
+(defn- call-tag [ast]
+  ;; TODO: Investigate :tag vs :o-tag vs :class
+  (let [{:keys [class o-tag tag op form]} ast]
+    (case op
+      :invoke (or tag o-tag class)
+      (or class o-tag tag))))
+
+(declare whitelisted-closeable?)
+
+(defn- whitelisted-ctor-args?
+  "Validate the matching ctor of cls with args."
+  [cls args]
+  (when-let [ctor (get-in *closeable-wrappers* [cls (count args)])]
+    (loop [v true params ctor [arg & more] args]
+      ;; The ctor vector includes nil values
+      (if (and v (seq params))
+        (if (first params)
+          ;; This is an (Auto)Closeable parameter, so allow resource free
+          ;; (Auto)Closeable objects and global resources
+          (recur (whitelisted-closeable? arg) (rest params) more)
+          ;; Other parameters must not be any kind of (Auto)Closeable object
+          (recur (not (closeable-class? (call-tag arg))) (rest params) more))
+        v))))
+
+(defn- whitelisted-closeable?
+  "Is this node either:
+
+   - A resource-free (Auto)Closeable object?
+   - A known form that returns a global resource?
+   - An (Auto)Closeable ctor invocation that wraps nodes that are also
+     whitelisted-closeable?
+
+   If the second optional boolean param is false, the first check is skipped."
+  [ast]
+  (let [{:keys [op form]} ast
+        cls (call-tag ast)]
     (if (contains? *closeable-wrappers* cls)
       (case op
-        (:new :invoke) (every? whitelisted-closeable? (:args ast))
+        :new (whitelisted-ctor-args? cls (:args ast))
         false)
       (or
         (contains? *resource-free-closeables* cls)
@@ -165,8 +217,7 @@
   "Is this an (Auto)Closeable object?"
   [ast]
   (let [{:keys [tag]} ast]
-    (and (class? tag)
-         (closeable-class? tag)
+    (and (closeable-class? tag)
          (not (whitelisted-closeable? ast)))))
 
 (defn- closeable-call?

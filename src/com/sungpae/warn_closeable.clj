@@ -174,7 +174,7 @@
 
 (defn- call-tag [ast]
   ;; TODO: Investigate :tag vs :o-tag vs :class
-  (let [{:keys [class o-tag tag op form]} ast]
+  (let [{:keys [class o-tag tag op]} ast]
     (case op
       :invoke (or tag o-tag class)
       (or class o-tag tag))))
@@ -219,9 +219,8 @@
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
-  (let [{:keys [tag]} ast]
-    (and (closeable-class? tag)
-         (not (whitelisted-closeable? ast)))))
+  (and (closeable-class? (:tag ast))
+       (not (whitelisted-closeable? ast))))
 
 (defn- closeable-call?
   "Is this a fn or interop call that returns an (Auto)Closeable object?"

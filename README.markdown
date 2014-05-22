@@ -5,12 +5,19 @@
 |________|___._|__| |__|__|   |____|__|_____|_____|_____|___._|_____|__|_____|
 ```
 
-# WIP
-
 A simple linter for Clojure namespaces that detects _possibly_ unclosed
-instances of (Auto)Closeable objects.
+instances of (Auto)Closeable objects. A similar feature exists for the
+[Eclipse IDE][].
 
-This library will optimally be included as an Eastwood linter.
+This project will optimally be included as an [Eastwood][] linter.
+
+I am currently waiting for [clarification][] regarding type information from
+[tools.analyzer.jvm][], but the core functionality is mostly complete.
+
+[Eclipse IDE]: http://help.eclipse.org/kepler/index.jsp?topic=%2Forg.eclipse.jdt.doc.user%2Ftasks%2Ftask-avoiding_resource_leaks.htm
+[Eastwood]: https://github.com/jonase/eastwood
+[clarification]: https://groups.google.com/forum/#!topic/clojure/vmU4M9CP1do
+[tools.analyzer.jvm]: https://github.com/clojure/tools.analyzer.jvm
 
 ## Usage
 

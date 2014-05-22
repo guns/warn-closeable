@@ -289,7 +289,7 @@
   (let [defname (:name ast)
         ^Class deftag (or (-> ast :meta :val :tag)
                           (when-let [sym (-> ast :meta :form :tag)]
-                            (resolve sym)))
+                            (try-resolve (str sym))))
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[_ errors children] fn-method]

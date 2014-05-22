@@ -54,7 +54,7 @@
        (.isAssignableFrom BASE-INTERFACE cls)))
 
 (defn- closeable-ctors
-  "Use reflection to return a map of parameter counts constructor param
+  "Use reflection to return a map of parameter counts to constructor param
    vectors that include at least one (Auto)Closeable instance. The contents
    of the param vectors should be considered boolean values: nil for
    non-closeable, Class for closeable."

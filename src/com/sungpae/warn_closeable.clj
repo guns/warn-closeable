@@ -394,14 +394,16 @@
        :form (maybe Sexp)
        :class (maybe Class)
        :message String}]
-   "
-  [^Namespace namespace]
+
+   The namespace is required before linting. Any arguments after the namespace
+   are passed to require as flags (e.g. :reload, :reload-all, and :verbose)."
+  [^Namespace namespace & require-flags]
   (binding [*ns* namespace]
     (with-open [rdr (namespace-reader namespace)]
       (let [ns-sym (ns-name namespace)]
         (try
           (binding [*warn-on-reflection* false]
-            (require ns-sym :reload))
+            (apply require ns-sym require-flags))
           (let [[rs [nodes errors]] (with-reflection-warnings
                                       (find-unclosed-resources
                                         (analyze (read-forms rdr))))

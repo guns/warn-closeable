@@ -150,13 +150,6 @@
                  (. java.lang.ClassLoader getSystemClassLoader)]]
       (str form))))
 
-(defn- analyze [form]
-  (binding [ana/macroexpand-1 jvm/macroexpand-1
-            ana/create-var    jvm/create-var
-            ana/parse         jvm/parse
-            ana/var?          var?]
-    (jvm/analyze form (jvm/empty-env))))
-
 ;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
 (defmacro ^:private cond->*
   "Takes an expression and a set of test/form pairs. Threads expr (via ->)
@@ -406,7 +399,7 @@
             (apply require ns-sym require-flags))
           (let [[rs [nodes errors]] (with-reflection-warnings
                                       (find-unclosed-resources
-                                        (analyze (read-forms rdr))))
+                                        (jvm/analyze (read-forms rdr))))
                 ws (for [ast nodes
                          :let [{:keys [form tag env]} ast
                                {:keys [ns line]} env

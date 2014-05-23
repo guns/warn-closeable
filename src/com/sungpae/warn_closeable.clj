@@ -400,6 +400,8 @@
     (with-open [rdr (namespace-reader namespace)]
       (let [ns-sym (ns-name namespace)]
         (try
+          (binding [*warn-on-reflection* false]
+            (require ns-sym :reload))
           (let [[rs [nodes errors]] (with-reflection-warnings
                                       (find-unclosed-resources
                                         (analyze (read-forms rdr))))
@@ -496,8 +498,6 @@
   ([& ns-syms]
    (doseq [ns-sym ns-syms]
      (try
-       (binding [*warn-on-reflection* false]
-         (require ns-sym))
        (let [[warnings errors] (closeable-warnings (find-ns ns-sym))]
          (print-errors! errors)
          (print-unclosed-warnings! warnings))

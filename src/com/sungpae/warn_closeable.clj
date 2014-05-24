@@ -419,42 +419,42 @@
    are passed to require as flags (e.g. :reload, :reload-all, and :verbose)."
   [^Namespace namespace & require-flags]
   (binding [*ns* namespace]
-    (with-open [rdr (namespace-reader namespace)]
-      (let [ns-sym (ns-name namespace)]
-        (try
-          (binding [*warn-on-reflection* false]
-            (apply require ns-sym require-flags))
-          (let [[rs [nodes errors]] (with-reflection-warnings
-                                      (-> rdr
-                                          read-forms
-                                          preserve-type-hints
-                                          jvm/analyze
-                                          find-unclosed-resources))
-                ws (for [ast nodes
-                         :let [{:keys [form tag env]} ast
-                               {:keys [ns line]} env
-                               value (-> ast :init :form)]]
-                     {:ns ns
-                      :line line
-                      :form (if value [form value] form)
-                      :class tag})
-                es (for [r rs
-                         :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
-                     {:ns ns-sym
-                      :type :reflection
-                      :line (Long/parseLong l)
-                      :message m})]
-            [(vec ws) (into errors es)])
-          (catch ExceptionInfo e
-            (let [{:keys [line class ast]} (.data e)]
-              [[] [{:ns ns-sym
+    (let [ns-sym (ns-name namespace)]
+      (try
+        (binding [*warn-on-reflection* false]
+          (apply require ns-sym require-flags))
+        (let [forms (with-open [rdr (namespace-reader namespace)]
+                      (read-forms rdr))
+              [rs [nodes errors]] (with-reflection-warnings
+                                    (-> forms
+                                        preserve-type-hints
+                                        jvm/analyze
+                                        find-unclosed-resources))
+              ws (for [ast nodes
+                       :let [{:keys [form tag env]} ast
+                             {:keys [ns line]} env
+                             value (-> ast :init :form)]]
+                   {:ns ns
                     :line line
-                    :form (:form ast)
-                    :class class
-                    :message (.getMessage e)}]]))
-          (catch Throwable e
+                    :form (if value [form value] form)
+                    :class tag})
+              es (for [r rs
+                       :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
+                   {:ns ns-sym
+                    :type :reflection
+                    :line (Long/parseLong l)
+                    :message m})]
+          [(vec ws) (into errors es)])
+        (catch ExceptionInfo e
+          (let [{:keys [line class ast]} (.data e)]
             [[] [{:ns ns-sym
-                  :message (str e)}]]))))))
+                  :line line
+                  :form (:form ast)
+                  :class class
+                  :message (.getMessage e)}]]))
+        (catch Throwable e
+          [[] [{:ns ns-sym
+                :message (str e)}]])))))
 
 (defn- classpath
   "System classpath as a sequence of string paths."

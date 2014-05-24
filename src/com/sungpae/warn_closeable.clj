@@ -29,11 +29,11 @@
   (:require [clojure.java.io :as io]
             [clojure.reflect :refer [type-reflect]]
             [clojure.string :as string]
-            [clojure.tools.analyzer :as ana]
             [clojure.tools.analyzer.ast :as ast]
             [clojure.tools.analyzer.jvm :as jvm]
             [clojure.tools.namespace.find :refer [find-namespaces]])
-  (:import (clojure.lang ExceptionInfo LineNumberingPushbackReader Namespace)
+  (:import (clojure.lang ExceptionInfo IMapEntry IRecord
+                         LineNumberingPushbackReader Namespace)
            (java.io File PrintWriter StringWriter)
            (java.net URL URLClassLoader URLDecoder)))
 
@@ -367,6 +367,33 @@
     (take-while (partial not= ::done)
                 (repeatedly #(read rdr false ::done)))))
 
+(defn- walk
+  "Adapted from clojure.walk/walk and clojure.walk/prewalk; this version
+   preserves metadata on compound forms."
+  [f form]
+  (let [x (cond
+            (list? form) (apply list (map f form))
+            (instance? IMapEntry form) (vec (map f form))
+            (seq? form) (doall (map f form))
+            (instance? IRecord form) (reduce (fn [r x] (conj r (f x))) form form)
+            (coll? form) (into (empty form) (map f form))
+            :else form)]
+    (if-let [m (meta form)]
+      (with-meta x m)
+      x)))
+
+(defn- prewalk [f form]
+  (walk (partial prewalk f) (f form)))
+
+(defn- preserve-type-hints
+  "Return a new form with :tag metadata entries duplicated to
+   :com.sungpae.warn-closeable/tag"
+  [form]
+  (prewalk #(if-let [m (meta %)]
+              (with-meta % (assoc m ::tag (:tag m)))
+              %)
+           form))
+
 (defn closeable-warnings
   "Detect potentially unclosed (Auto)Closeable objects.
 
@@ -398,8 +425,11 @@
           (binding [*warn-on-reflection* false]
             (apply require ns-sym require-flags))
           (let [[rs [nodes errors]] (with-reflection-warnings
-                                      (find-unclosed-resources
-                                        (jvm/analyze (read-forms rdr))))
+                                      (-> rdr
+                                          read-forms
+                                          preserve-type-hints
+                                          jvm/analyze
+                                          find-unclosed-resources))
                 ws (for [ast nodes
                          :let [{:keys [form tag env]} ast
                                {:keys [ns line]} env
@@ -432,7 +462,7 @@
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
-(defn ^:private project-namespace-symbols
+(defn- project-namespace-symbols
   "Extract a sequence of ns symbols in *.clj files from a collection of
    paths, which may be a mix of files or directories, and may be any type
    implementing clojure.java.io/Coercions. If no paths are given, the entire

@@ -26,51 +26,17 @@
        (with-open [input (io/input-stream x509-cert-file)]
          (.generateCertificates (CertificateFactory/getInstance \"X.509\") input)))
    "
-  (:require [clojure.java.io :as io]
-            [clojure.reflect :refer [type-reflect]]
-            [clojure.string :as string]
-            [clojure.tools.analyzer.ast :as ast]
+  (:require [clojure.tools.analyzer.ast :as ast]
             [clojure.tools.analyzer.jvm :as jvm]
-            [clojure.tools.namespace.find :refer [find-namespaces]])
-  (:import (clojure.lang ExceptionInfo IMapEntry IRecord
-                         LineNumberingPushbackReader Namespace)
-           (java.io File PrintWriter StringWriter)
-           (java.net URL URLClassLoader URLDecoder)))
-
-(defn- ^Class try-resolve [class-name]
-  (try
-    (Class/forName class-name)
-    (catch ClassNotFoundException _)))
-
-(def ^:private ^Class BASE-INTERFACE
-  "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."
-  (or (try-resolve "java.lang.AutoCloseable")
-      java.io.Closeable))
-
-(defn- closeable-class?
-  "Does this class implement (Auto)Closeable?"
-  [cls]
-  (and (class? cls)
-       (.isAssignableFrom BASE-INTERFACE cls)))
-
-(defn- closeable-ctors
-  "Use reflection to return a map of parameter counts to constructor param
-   vectors that include at least one (Auto)Closeable instance. The contents
-   of the param vectors should be considered boolean values: nil for
-   non-closeable, Class for closeable."
-  [^Class cls]
-  (let [csym (symbol (.getCanonicalName cls))]
-    (->> (type-reflect cls)
-         :members
-         (filter #(and (= (:name %) csym)
-                       (contains? (:flags %) :public)))
-         (map (fn [c]
-                (mapv #(when-let [p (try-resolve (str %))]
-                         (when (closeable-class? p)
-                           p))
-                      (:parameter-types c))))
-         (filter (partial some identity))
-         (reduce (fn [m params] (assoc m (count params) params)) {}))))
+            [com.sungpae.warn-closeable.util :refer [closeable-class?
+                                                     closeable-ctors
+                                                     namespace-reader prewalk
+                                                     print-errors!
+                                                     print-unclosed-warnings!
+                                                     project-namespace-symbols
+                                                     read-forms try-resolve
+                                                     with-reflection-warnings]])
+  (:import (clojure.lang ExceptionInfo Namespace)))
 
 (def ^:dynamic *resource-free-closeables*
   "Set of (Auto)Closeable classes that do not allocate OS resources.
@@ -149,21 +115,6 @@
                  (. java.lang.System err)
                  (. java.lang.ClassLoader getSystemClassLoader)]]
       (str form))))
-
-;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
-(defmacro ^:private cond->*
-  "Takes an expression and a set of test/form pairs. Threads expr (via ->)
-   through each form for which the corresponding test
-   expression is true. Note that, unlike cond branching, cond-> threading does
-   not short circuit after the first true test expression."
-  {:added "1.5"}
-  [expr & clauses]
-  (assert (even? (count clauses)))
-  (let [g (gensym)
-        pstep (fn [[test step]] `(if ~test (-> ~g ~step) ~g))]
-    `(let [~g ~expr
-           ~@(interleave (repeat g) (map pstep (partition 2 clauses)))]
-       ~g)))
 
 (defn- call-tag [ast]
   ;; TODO: Investigate :tag vs :o-tag vs :class
@@ -337,54 +288,6 @@
             (update-in [1] into (vs' 1))))
       [unclosed errors] (mapv find-unclosed-resources children))))
 
-(defn- ^LineNumberingPushbackReader namespace-reader
-  "Return a reader on the resource corresponding to ns."
-  [ns]
-  (->> (str ns)
-       (replace {\. \/ \- \_})
-       string/join
-       (format "%s.clj")
-       io/resource
-       io/reader
-       LineNumberingPushbackReader.))
-
-(defmacro ^:private with-reflection-warnings
-  "Execute body and return tuple of:
-   * Vector of reflection warning lines
-   * Return value of body"
-  [& body]
-  `(let [sw# (new ~StringWriter)
-         v# (binding [*warn-on-reflection* true
-                      *out* (new ~PrintWriter sw#)]
-              (do ~@body))
-         ws# (->> (str sw#)
-                  ~string/split-lines
-                  (filterv #(.startsWith ^String % "Reflection warning")))]
-     [ws# v#]))
-
-(defn- read-forms [rdr]
-  (vec
-    (take-while (partial not= ::done)
-                (repeatedly #(read rdr false ::done)))))
-
-(defn- walk
-  "Adapted from clojure.walk/walk and clojure.walk/prewalk; this version
-   preserves metadata on compound forms."
-  [f form]
-  (let [x (cond
-            (list? form) (apply list (map f form))
-            (instance? IMapEntry form) (vec (map f form))
-            (seq? form) (doall (map f form))
-            (instance? IRecord form) (reduce (fn [r x] (conj r (f x))) form form)
-            (coll? form) (into (empty form) (map f form))
-            :else form)]
-    (if-let [m (meta form)]
-      (with-meta x m)
-      x)))
-
-(defn- prewalk [f form]
-  (walk (partial prewalk f) (f form)))
-
 (defn- preserve-type-hints
   "Return a new form with :tag metadata entries duplicated to
    :com.sungpae.warn-closeable/tag"
@@ -455,61 +358,6 @@
         (catch Throwable e
           [[] [{:ns ns-sym
                 :message (str e)}]])))))
-
-(defn- classpath
-  "System classpath as a sequence of string paths."
-  []
-  (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
-    (URLDecoder/decode (.getPath url) "UTF-8")))
-
-(defn- project-namespace-symbols
-  "Extract a sequence of ns symbols in *.clj files from a collection of
-   paths, which may be a mix of files or directories, and may be any type
-   implementing clojure.java.io/Coercions. If no paths are given, the entire
-   classpath is searched."
-  ([]
-   (project-namespace-symbols (classpath)))
-  ([paths]
-   (->> paths
-        (map io/file)
-        (filter (fn [^File f]
-                  (or (.isDirectory f)
-                      (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
-        find-namespaces)))
-
-(defn- print-error-line!
-  "Pretty print an error-map.
-   See closeable-warnings for the error-map schema."
-  [error-map]
-  (let [{:keys [line message form class]} error-map
-        sb (cond->* (StringBuilder. "  ")
-             line (.append (str line ": "))
-             message (.append (str message " "))
-             form (.append (str form " "))
-             class (.append (str \[ class \])))]
-    (println (str sb))))
-
-(defn- print-errors!
-  "Pretty print a sequence of error maps.
-   See closeable-warnings for the error-map schema."
-  [error-maps]
-  (doseq [[ns ws] (group-by :ns error-maps)]
-    (let [{rs :reflection es nil} (group-by :type ws)]
-      (when (seq es)
-        (printf "[%s] ERRORS:\n" ns)
-        (doseq [e es] (print-error-line! e)))
-      (when (seq rs)
-        (printf "[%s] REFLECTION WARNINGS:\n" ns)
-        (doseq [r rs] (print-error-line! r))))))
-
-(defn- print-unclosed-warnings!
-  "Pretty print a sequence of unclosed resource warning maps.
-   See closeable-warnings for the warning map schema."
-  [u-warnings]
-  (doseq [[ns ws] (group-by :ns u-warnings)]
-    (printf "[%s] Possibly unclosed (Auto)Closeable resources:\n" ns)
-    (doseq [{:keys [line form class]} ws]
-      (printf "  %d: %s [%s]\n" line form class))))
 
 (defn warn-closeable!
   "Iterate through ns-syms and print the results of closeable-warnings on the

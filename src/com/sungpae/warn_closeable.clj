@@ -45,14 +45,14 @@
    Copyright (c) 2012, 2013 Eclipse Foundation and others."
   (reduce
     (fn [s k] (if-let [c (try-resolve k)] (conj s c) s))
-    #{} ["java.io.ByteArrayInputStream"
-         "java.io.ByteArrayOutputStream"
-         "java.io.CharArrayReader"
-         "java.io.CharArrayWriter"
-         "java.io.StringReader"
-         "java.io.StringWriter"
-         "java.io.StringBufferInputStream"
-         "java.util.stream.Stream"]))
+    #{} '[java.io.ByteArrayInputStream
+          java.io.ByteArrayOutputStream
+          java.io.CharArrayReader
+          java.io.CharArrayWriter
+          java.io.StringReader
+          java.io.StringWriter
+          java.io.StringBufferInputStream
+          java.util.stream.Stream]))
 
 (def ^:dynamic *closeable-wrappers*
   "Map of (Auto)Closeable classes that wrap other resources.
@@ -66,42 +66,42 @@
       (if-let [c (try-resolve k)]
         (assoc m c (closeable-ctors c))
         m))
-    {} ["clojure.lang.LineNumberingPushbackReader"
-        "java.io.BufferedInputStream"
-        "java.io.BufferedOutputStream"
-        "java.io.BufferedReader"
-        "java.io.BufferedWriter"
-        "java.io.InputStreamReader"
-        "java.io.PrintWriter"
-        "java.io.LineNumberReader"
-        "java.io.DataInputStream"
-        "java.io.DataOutputStream"
-        "java.io.ObjectInputStream"
-        "java.io.ObjectOutputStream"
-        "java.io.FilterInputStream"
-        "java.io.FilterOutputStream"
-        "java.io.PushbackInputStream"
-        "java.io.SequenceInputStream"
-        "java.io.PrintStream"
-        "java.io.PushbackReader"
-        "java.io.OutputStreamWriter"
-        "java.util.zip.GZIPInputStream"
-        "java.util.zip.InflaterInputStream"
-        "java.util.zip.DeflaterInputStream"
-        "java.util.zip.CheckedInputStream"
-        "java.util.zip.ZipInputStream"
-        "java.util.jar.JarInputStream"
-        "java.util.zip.GZIPOutputStream"
-        "java.util.zip.InflaterOutputStream"
-        "java.util.zip.DeflaterOutputStream"
-        "java.util.zip.CheckedOutputStream"
-        "java.util.zip.ZipOutputStream"
-        "java.util.jar.JarOutputStream"
-        "java.security.DigestInputStream"
-        "java.security.DigestOutputStream"
-        "java.beans.XMLEncoder"
-        "java.beans.XMLDecoder"
-        "javax.sound.sampled.AudioInputStream"]))
+    {} '[clojure.lang.LineNumberingPushbackReader
+         java.io.BufferedInputStream
+         java.io.BufferedOutputStream
+         java.io.BufferedReader
+         java.io.BufferedWriter
+         java.io.InputStreamReader
+         java.io.PrintWriter
+         java.io.LineNumberReader
+         java.io.DataInputStream
+         java.io.DataOutputStream
+         java.io.ObjectInputStream
+         java.io.ObjectOutputStream
+         java.io.FilterInputStream
+         java.io.FilterOutputStream
+         java.io.PushbackInputStream
+         java.io.SequenceInputStream
+         java.io.PrintStream
+         java.io.PushbackReader
+         java.io.OutputStreamWriter
+         java.util.zip.GZIPInputStream
+         java.util.zip.InflaterInputStream
+         java.util.zip.DeflaterInputStream
+         java.util.zip.CheckedInputStream
+         java.util.zip.ZipInputStream
+         java.util.jar.JarInputStream
+         java.util.zip.GZIPOutputStream
+         java.util.zip.InflaterOutputStream
+         java.util.zip.DeflaterOutputStream
+         java.util.zip.CheckedOutputStream
+         java.util.zip.ZipOutputStream
+         java.util.jar.JarOutputStream
+         java.security.DigestInputStream
+         java.security.DigestOutputStream
+         java.beans.XMLEncoder
+         java.beans.XMLDecoder
+         javax.sound.sampled.AudioInputStream]))
 
 (def ^:dynamic *system-resource-forms*
   "Set of forms that are known to return global (Auto)Closeable resources that
@@ -232,7 +232,7 @@
   (let [defname (:name ast)
         ^Class deftag (or (-> ast :meta :val :tag)
                           (when-let [sym (-> ast :meta :form :tag)]
-                            (try-resolve (str sym))))
+                            (try-resolve sym)))
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[_ errors children] fn-method]

@@ -9,9 +9,10 @@
            (java.net URL URLClassLoader URLDecoder)))
 
 (defn ^Class try-resolve [class-name]
-  (try
-    (Class/forName class-name)
-    (catch ClassNotFoundException _)))
+  (when class-name
+    (try
+      (Class/forName (str class-name))
+      (catch ClassNotFoundException _))))
 
 (def ^:private ^Class BASE-INTERFACE
   "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."
@@ -35,7 +36,7 @@
        (filter #(and (= (:name %) (symbol (.getCanonicalName cls)))
                      (contains? (:flags %) :public)))
        (map (fn [c]
-              (mapv #(when-let [p (try-resolve (str %))]
+              (mapv #(when-let [p (try-resolve %)]
                        (when (closeable-class? p)
                          p))
                     (:parameter-types c))))

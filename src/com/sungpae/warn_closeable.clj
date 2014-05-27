@@ -31,12 +31,12 @@
             [com.sungpae.warn-closeable.util :refer [closeable-class?
                                                      closeable-ctors
                                                      namespace-reader
-                                                     print-errors!
+                                                     ns-symbol print-errors!
                                                      print-unclosed-warnings!
                                                      project-namespace-symbols
                                                      read-forms try-resolve
                                                      with-reflection-warnings]])
-  (:import (clojure.lang ExceptionInfo Namespace)))
+  (:import (clojure.lang ExceptionInfo)))
 
 (def ^:dynamic *resource-free-closeables*
   "Set of (Auto)Closeable classes that do not allocate OS resources.
@@ -330,33 +330,33 @@
 (defn closeable-warnings
   "Detect potentially unclosed (Auto)Closeable objects.
 
-   Returns a tuple of:
+   Returns a map of:
 
    * Unclosed resource warnings:
 
-     [{:ns Symbol
-       :line Int
-       :form Sexp
-       :class Class}]
+     :unclosed [{:ns Symbol
+                 :line Int
+                 :form Sexp
+                 :class Class}]
 
    * Reflection warnings and other errors:
 
-     [{:ns Symbol
-       :type Keyword
-       :line (maybe Int)
-       :form (maybe Sexp)
-       :class (maybe Class)
-       :message String}]
+     :errors [{:ns Symbol
+               :type Keyword
+               :line (maybe Int)
+               :form (maybe Sexp)
+               :class (maybe Class)
+               :message String}]
 
    The namespace is required before linting. Any arguments after the namespace
    are passed to require as flags (e.g. :reload, :reload-all, and :verbose)."
-  [^Namespace namespace & require-flags]
-  (binding [*ns* namespace]
-    (let [ns-sym (ns-name namespace)]
-      (try
-        (binding [*warn-on-reflection* false]
-          (apply require ns-sym require-flags))
-        (let [forms (with-open [rdr (namespace-reader namespace)]
+  [ns & require-flags]
+  (try
+    (let [ns-sym (ns-symbol ns)]
+      (binding [*warn-on-reflection* false]
+        (apply require ns-sym require-flags))
+      (binding [*ns* (find-ns ns-sym)]
+        (let [forms (with-open [rdr (namespace-reader ns)]
                       (read-forms rdr))
               [rs [nodes errors]] (with-reflection-warnings
                                     (-> forms
@@ -376,32 +376,35 @@
                     :line line
                     :form (if value [form value] form)
                     :class (get-class ast)})]
-          [(into errors es) (vec ws)])
-        (catch ExceptionInfo e
-          (let [{:keys [line class ast]} (.data e)]
-            [[] [{:ns ns-sym
-                  :line line
-                  :form (:form ast)
-                  :class class
-                  :message (.getMessage e)}]]))
-        (catch Throwable e
-          [[] [{:ns ns-sym
-                :message (str e)}]])))))
+          {:unclosed (vec ws)
+           :errors (into errors es)})))
+    (catch ExceptionInfo e
+      (let [{:keys [line class ast]} (.data e)]
+        {:unclosed []
+         :errors [{:ns (ns-symbol ns)
+                   :line line
+                   :form (:form ast)
+                   :class class
+                   :message (.getMessage e)}]}))
+    (catch Throwable e
+      {:unclosed []
+       :errors [{:ns (ns-symbol ns)
+                 :message (str e)}]})))
 
 (defn warn-closeable!
-  "Iterate through ns-syms and print the results of closeable-warnings on the
-   namespace. If no namespace symbols are given, all project namespaces on the
-   classpath are linted.
+  "Lint namespaces and print warnings to *out*. If no namespaces are given,
+   all project namespaces on the classpath are linted. Namespaces can be
+   specified as Symbols or Namespace objects.
 
    Reflection warnings in the namespace are also printed, as statically
    detecting (Auto)Closeable instances relies on properly type hinted code."
   ([]
-   (apply warn-closeable! (project-namespace-symbols)))
-  ([& ns-syms]
-   (doseq [ns-sym ns-syms]
+   (warn-closeable! (project-namespace-symbols)))
+  ([namespaces & require-flags]
+   (doseq [ns namespaces]
      (try
-       (let [[errors warnings] (closeable-warnings (find-ns ns-sym))]
+       (let [{:keys [errors unclosed]} (apply closeable-warnings ns require-flags)]
          (print-errors! errors)
-         (print-unclosed-warnings! warnings))
+         (print-unclosed-warnings! unclosed))
        (catch Throwable e
          (printf "ERROR: %s\n" e))))))

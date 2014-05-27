@@ -4,25 +4,24 @@
             [clojure.test :refer [deftest is testing]]
             [com.sungpae.warn-closeable :refer [closeable-warnings]]))
 
-(defn has-warnings
-  [clj-string warnings errors]
-  (let [name (second (read-string clj-string))
-        path (->> (str name)
+(defn- munge-forms
+  "List equality fails with :static-call forms"
+  [coll]
+  (mapv #(update-in % [:form] str) coll))
+
+(defn has-warnings [clj-string exp-unclosed exp-errors]
+  (let [ns (second (read-string clj-string))
+        path (->> (str ns)
                   (replace {\- \_ \. \/})
                   string/join
-                  (format "test/%s.clj"))
-        ;; List equality fails with :static-call forms
-        form-str (fn [coll] (mapv #(update-in % [:form] str) coll))]
+                  (format "target/classes/%s.clj"))]
     (try
       (spit path clj-string)
-      (binding [*warn-on-reflection* false]
-        (require name :reload))
-      (let [ns (find-ns name)
-            [es ws] (closeable-warnings ns)]
-        (is (= es errors))
-        (is (= (form-str ws) (form-str warnings))))
+      (let [{:keys [errors unclosed]} (closeable-warnings ns :reload)]
+        (is (= errors exp-errors))
+        (is (= (munge-forms unclosed) (munge-forms exp-unclosed))))
       (finally
-        (remove-ns name)
+        (remove-ns ns)
         (io/delete-file path :silently true)))))
 
 (deftest test-closeable-invoke

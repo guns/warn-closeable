@@ -8,6 +8,11 @@
            (java.io File PrintWriter StringWriter)
            (java.net URL URLClassLoader URLDecoder)))
 
+(defn ns-symbol [ns]
+  (case (class ns)
+    #=clojure.lang.Namespace (ns-name ns)
+    #=clojure.lang.Symbol ns))
+
 (defn ^Class try-resolve [class-name]
   (cond (class? class-name) class-name
         (nil? class-name) nil

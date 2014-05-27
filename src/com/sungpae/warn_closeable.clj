@@ -116,7 +116,7 @@
                  (. java.lang.ClassLoader getSystemClassLoader)]]
       (str form))))
 
-(defn- ^Class class-of
+(defn- ^Class get-class
   "Nicola Mometto:
 
    Regarding the :tag/:o-tag difference, :o-tag (you can read it as \"original
@@ -141,9 +141,8 @@
       :static-call (:o-tag ast)
       :instance-call (:o-tag ast)
       ;; Return tags of schema.core/defn do not appear in :meta :val
-      :def (if-let [c (-> ast :meta :val :tag)]
-             c
-             (-> ast :meta :form :tag))
+      :def (or (-> ast :meta :val :tag)
+               (-> ast :meta :form :tag))
       (or (:class ast) (:o-tag ast)))))
 
 (comment
@@ -177,7 +176,7 @@
           ;; (Auto)Closeable objects and global resources
           (recur (whitelisted-closeable? arg) (rest params) more)
           ;; Other parameters must not be any kind of (Auto)Closeable object
-          (recur (not (closeable-class? (class-of arg))) (rest params) more))
+          (recur (not (closeable-class? (get-class arg))) (rest params) more))
         v))))
 
 (defn- whitelisted-closeable?
@@ -191,7 +190,7 @@
    If the second optional boolean param is false, the first check is skipped."
   [ast]
   (let [{:keys [op form]} ast
-        cls (class-of ast)]
+        cls (get-class ast)]
     (if (contains? *closeable-wrappers* cls)
       (case op
         :new (whitelisted-ctor-args? cls (:args ast))
@@ -203,7 +202,7 @@
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
-  (and (closeable-class? (class-of ast))
+  (and (closeable-class? (get-class ast))
        (not (whitelisted-closeable? ast))))
 
 (defn- closeable-call?
@@ -265,30 +264,32 @@
    []
    (conj (non-closeable-bindings ast) (:body ast))])
 
+(defn- make-defn-error [def-ast fn-method]
+  (let [defname (:name def-ast)
+        deftag (get-class def-ast)
+        args (:arglist fn-method)]
+    {:ns (ns-name *ns*)
+     :type :reflection
+     :line (-> fn-method :env :line)
+     :message (let [ret (.getCanonicalName (get-class (:body fn-method)))]
+                (if (nil? deftag)
+                  (format "fn-method `%s %s` missing type hint ^%s"
+                          defname args ret)
+                  (format "fn-method `%s %s` tagged as %s, but returns %s"
+                          defname args (.getCanonicalName deftag) ret)))}))
+
 (defn- lint-defn
   "unclosed-resources helper for :def nodes that wrap a :fn node. Only checks
    for missing (Auto)Closeable type hints on the :def node."
   [ast]
-  (let [defname (:name ast)
-        ^Class deftag (class-of ast)
+  (let [deftag (get-class ast)
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[_ errors children] fn-method]
-        (if (closeable? (:body fn-method))
-          (if (= deftag (class-of (:body fn-method)))
-            [_ errors children]
-            (let [args (:arglist fn-method)
-                  e {:ns (ns-name *ns*)
-                     :type :reflection
-                     :line (-> fn-method :env :line)
-                     :message (let [ret (.getCanonicalName (class-of (:body fn-method)))]
-                                (if (nil? deftag)
-                                  (format "fn-method `%s %s` missing type hint ^%s"
-                                          defname args ret)
-                                  (format "fn-method `%s %s` tagged as %s, but returns %s"
-                                          defname args (.getCanonicalName deftag) ret)))}]
-              [[] (conj errors e) children]))
-          [[] errors (conj children fn-method)]))
+        (cond
+          (not (closeable? (:body fn-method))) [[] errors (conj children fn-method)]
+          (= deftag (get-class (:body fn-method))) [[] errors children]
+          :else [[] (conj errors (make-defn-error ast fn-method)) children]))
       [[] [] [(:meta ast)]] fn-methods)))
 
 (defn- unclosed-resources
@@ -374,7 +375,7 @@
                    {:ns ns
                     :line line
                     :form (if value [form value] form)
-                    :class (class-of ast)})]
+                    :class (get-class ast)})]
           [(into errors es) (vec ws)])
         (catch ExceptionInfo e
           (let [{:keys [line class ast]} (.data e)]

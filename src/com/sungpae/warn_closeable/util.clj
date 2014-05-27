@@ -17,12 +17,14 @@
   (cond (class? class-name) class-name
         (nil? class-name) nil
         :else (try
-                (Class/forName (str class-name))
+                (let [x (resolve class-name)]
+                  (when (class? x)
+                    x))
                 (catch ClassNotFoundException _))))
 
 (def ^:private ^Class BASE-INTERFACE
   "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."
-  (or (try-resolve "java.lang.AutoCloseable")
+  (or (try-resolve 'java.lang.AutoCloseable)
       java.io.Closeable))
 
 (defn closeable-class?

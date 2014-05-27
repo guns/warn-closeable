@@ -361,6 +361,12 @@
                                     (-> forms
                                         jvm/analyze
                                         find-unclosed-resources))
+              es (for [r rs
+                       :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
+                   {:ns ns-sym
+                    :type :reflection
+                    :line (Long/parseLong l)
+                    :message m})
               ws (for [ast nodes
                        :let [{:keys [form env]} ast
                              {:keys [ns line]} env
@@ -368,14 +374,8 @@
                    {:ns ns
                     :line line
                     :form (if value [form value] form)
-                    :class (class-of ast)})
-              es (for [r rs
-                       :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
-                   {:ns ns-sym
-                    :type :reflection
-                    :line (Long/parseLong l)
-                    :message m})]
-          [(vec ws) (into errors es)])
+                    :class (class-of ast)})]
+          [(into errors es) (vec ws)])
         (catch ExceptionInfo e
           (let [{:keys [line class ast]} (.data e)]
             [[] [{:ns ns-sym
@@ -399,7 +399,7 @@
   ([& ns-syms]
    (doseq [ns-sym ns-syms]
      (try
-       (let [[warnings errors] (closeable-warnings (find-ns ns-sym))]
+       (let [[errors warnings] (closeable-warnings (find-ns ns-sym))]
          (print-errors! errors)
          (print-unclosed-warnings! warnings))
        (catch Throwable e

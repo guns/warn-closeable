@@ -18,9 +18,9 @@
       (binding [*warn-on-reflection* false]
         (require name :reload))
       (let [ns (find-ns name)
-            [ws es] (closeable-warnings ns)]
-        (is (= (form-str ws) (form-str warnings)))
-        (is (= es errors)))
+            [es ws] (closeable-warnings ns)]
+        (is (= es errors))
+        (is (= (form-str ws) (form-str warnings))))
       (finally
         (remove-ns name)
         (io/delete-file path :silently true)))))

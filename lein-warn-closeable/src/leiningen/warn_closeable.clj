@@ -13,5 +13,9 @@
   (let [profile (get project :warn-closeable warn-closeable-profile)
         project (merge-profiles project [profile])]
     (eval-in-project project
-      `(com.sungpae.warn-closeable/warn-closeable! ~@src-paths)
+      (if (seq src-paths)
+        `(com.sungpae.warn-closeable/warn-closeable!
+           (com.sungpae.warn-closeable.util/project-namespace-symbols ~(vec src-paths)))
+        `(com.sungpae.warn-closeable/warn-closeable!
+           (com.sungpae.warn-closeable.util/project-namespace-symbols)))
       `(require 'com.sungpae.warn-closeable))))

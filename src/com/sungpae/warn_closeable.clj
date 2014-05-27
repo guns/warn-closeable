@@ -116,12 +116,52 @@
                  (. java.lang.ClassLoader getSystemClassLoader)]]
       (str form))))
 
-(defn- call-tag [ast]
-  ;; TODO: Investigate :tag vs :o-tag vs :class
-  (let [{:keys [class o-tag tag op]} ast]
-    (case op
-      :invoke (or tag o-tag class)
-      (or class o-tag tag))))
+(defn- ^Class class-of
+  "Nicola Mometto:
+
+   Regarding the :tag/:o-tag difference, :o-tag (you can read it as \"original
+   tag\") holds the static type of the node known at that point and might be
+   either inferred by the :tag of some children nodes or from the class of the
+   :form of the node in case it's a literal, :tag on the other hand can be
+   either the same of :o-tag or hold the Class that node needs to be cast to,
+   usually because of an explicit type-hint.
+
+   For example, ^IPersistentCollection [] will have :o-tag PersistentVector
+   and :tag IPersistentCollection.
+
+   :class is an attribute of some nodes that deal with host interop forms,
+   like :new, :instance-call and others and holds the Class that node
+   deals with; for example it might hold the Class a :new node is going to
+   instantiate, the Class an :instance-method belongs to etc."
+  [ast]
+  (try-resolve
+    (case (:op ast)
+      :invoke (-> ast :fn :return-tag)
+      :new (:class ast)
+      :static-call (:o-tag ast)
+      :instance-call (:o-tag ast)
+      ;; Return tags of schema.core/defn do not appear in :meta :val
+      :def (if-let [c (-> ast :meta :val :tag)]
+             c
+             (-> ast :meta :form :tag))
+      (or (:class ast) (:o-tag ast)))))
+
+(comment
+  (defn debug [form]
+    (doseq [ast (ast/nodes (jvm/analyze form))]
+      (binding [*print-length* nil *print-level* 8]
+        (clojure.pprint/pprint ast))))
+
+  (debug '(.toString (clojure.java.io/reader 'x)))
+  (debug '(.toString (new java.io.FileInputStream "x")))
+  (debug '(.toString
+            (java.nio.file.Files/newByteChannel
+              (.toPath (java.io.File. "x"))
+              (make-array java.nio.file.StandardOpenOption 0))))
+  (debug '(.toString (.accept (java.net.ServerSocket. 80 0xff "example.com"))))
+  (debug '(defn ^java.io.FileInputStream foo [^String x] (java.io.FileInputStream. x)))
+  (debug '(schema.core/defn foo :- java.io.FileInputStream [x :- String] (java.io.FileInputStream. x)))
+  )
 
 (declare whitelisted-closeable?)
 
@@ -137,7 +177,7 @@
           ;; (Auto)Closeable objects and global resources
           (recur (whitelisted-closeable? arg) (rest params) more)
           ;; Other parameters must not be any kind of (Auto)Closeable object
-          (recur (not (closeable-class? (call-tag arg))) (rest params) more))
+          (recur (not (closeable-class? (class-of arg))) (rest params) more))
         v))))
 
 (defn- whitelisted-closeable?
@@ -151,7 +191,7 @@
    If the second optional boolean param is false, the first check is skipped."
   [ast]
   (let [{:keys [op form]} ast
-        cls (call-tag ast)]
+        cls (class-of ast)]
     (if (contains? *closeable-wrappers* cls)
       (case op
         :new (whitelisted-ctor-args? cls (:args ast))
@@ -163,7 +203,7 @@
 (defn- closeable?
   "Is this an (Auto)Closeable object?"
   [ast]
-  (and (closeable-class? (:tag ast))
+  (and (closeable-class? (class-of ast))
        (not (whitelisted-closeable? ast))))
 
 (defn- closeable-call?
@@ -230,20 +270,18 @@
    for missing (Auto)Closeable type hints on the :def node."
   [ast]
   (let [defname (:name ast)
-        ^Class deftag (or (-> ast :meta :val :tag)
-                          (when-let [sym (-> ast :meta :form :tag)]
-                            (try-resolve sym)))
+        ^Class deftag (class-of ast)
         fn-methods (-> ast :init :methods)]
     (reduce
       (fn [[_ errors children] fn-method]
         (if (closeable? (:body fn-method))
-          (if (= deftag (:tag (:body fn-method)))
+          (if (= deftag (class-of (:body fn-method)))
             [_ errors children]
             (let [args (:arglist fn-method)
                   e {:ns (ns-name *ns*)
                      :type :reflection
                      :line (-> fn-method :env :line)
-                     :message (let [ret (.getCanonicalName ^Class (:tag (:body fn-method)))]
+                     :message (let [ret (.getCanonicalName (class-of (:body fn-method)))]
                                 (if (nil? deftag)
                                   (format "fn-method `%s %s` missing type hint ^%s"
                                           defname args ret)
@@ -334,13 +372,13 @@
                                         jvm/analyze
                                         find-unclosed-resources))
               ws (for [ast nodes
-                       :let [{:keys [form tag env]} ast
+                       :let [{:keys [form env]} ast
                              {:keys [ns line]} env
                              value (-> ast :init :form)]]
                    {:ns ns
                     :line line
                     :form (if value [form value] form)
-                    :class tag})
+                    :class (class-of ast)})
               es (for [r rs
                        :let [[_ l m] (re-find #"\S+:(\d+):[\d\s]*- (.*)" r)]]
                    {:ns ns-sym

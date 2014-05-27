@@ -9,10 +9,11 @@
            (java.net URL URLClassLoader URLDecoder)))
 
 (defn ^Class try-resolve [class-name]
-  (when class-name
-    (try
-      (Class/forName (str class-name))
-      (catch ClassNotFoundException _))))
+  (cond (class? class-name) class-name
+        (nil? class-name) nil
+        :else (try
+                (Class/forName (str class-name))
+                (catch ClassNotFoundException _))))
 
 (def ^:private ^Class BASE-INTERFACE
   "JRE 1.7+ introduced AutoCloseable for the try-with-resources feature."

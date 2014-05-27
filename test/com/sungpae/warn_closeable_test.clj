@@ -204,6 +204,36 @@
       :line 11
       :message "reference to field or no args method call read cannot be resolved"}]))
 
+(deftest test-closeable-inner-form-tags
+  (has-warnings
+    "(ns example)
+     (defn foo [^String x]
+       (.toString (clojure.java.io/reader x))
+       (.toString (java.io.FileInputStream. x))
+       (.toString (.accept (java.net.ServerSocket. 80 0xff x)))
+       (.toString (java.nio.file.Files/newByteChannel
+                    (.toPath (java.io.File. x))
+                    (make-array java.nio.file.StandardOpenOption 0))))"
+    [{:ns 'example
+      :line 3
+      :form '(clojure.java.io/reader x)
+      :class java.io.Reader}
+     {:ns 'example
+      :line 4
+      :form '(new java.io.FileInputStream x)
+      :class java.io.FileInputStream}
+     {:ns 'example
+      :line 5
+      :form '(. (java.net.ServerSocket. 80 0xff x) accept)
+      :class java.net.Socket}
+     {:ns 'example
+      :line 6
+      :form '(. java.nio.file.Files
+                (newByteChannel (.toPath (java.io.File. x))
+                                (make-array java.nio.file.StandardOpenOption 0)))
+      :class java.nio.channels.SeekableByteChannel}]
+    []))
+
 ; TODO: If we do this, it must be more flexible
 ; (deftest test-closeable-close-in-binding
 ;   (has-warnings

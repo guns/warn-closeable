@@ -30,7 +30,7 @@
             [clojure.tools.analyzer.jvm :as jvm]
             [com.sungpae.warn-closeable.util :refer [closeable-class?
                                                      closeable-ctors
-                                                     namespace-reader prewalk
+                                                     namespace-reader
                                                      print-errors!
                                                      print-unclosed-warnings!
                                                      project-namespace-symbols
@@ -326,15 +326,6 @@
             (update-in [1] into (vs' 1))))
       [unclosed errors] (mapv find-unclosed-resources children))))
 
-(defn- preserve-type-hints
-  "Return a new form with :tag metadata entries duplicated to
-   :com.sungpae.warn-closeable/tag"
-  [form]
-  (prewalk #(if-let [m (meta %)]
-              (with-meta % (assoc m ::tag (:tag m)))
-              %)
-           form))
-
 (defn closeable-warnings
   "Detect potentially unclosed (Auto)Closeable objects.
 
@@ -368,7 +359,6 @@
                       (read-forms rdr))
               [rs [nodes errors]] (with-reflection-warnings
                                     (-> forms
-                                        preserve-type-hints
                                         jvm/analyze
                                         find-unclosed-resources))
               ws (for [ast nodes

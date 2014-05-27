@@ -95,24 +95,6 @@
     (take-while (partial not= ::done)
                 (repeatedly #(read rdr false ::done)))))
 
-(defn- walk
-  "Adapted from clojure.walk/walk and clojure.walk/prewalk; this version
-   preserves metadata on compound forms."
-  [f form]
-  (let [x (cond
-            (list? form) (apply list (map f form))
-            (instance? IMapEntry form) (vec (map f form))
-            (seq? form) (doall (map f form))
-            (instance? IRecord form) (reduce (fn [r x] (conj r (f x))) form form)
-            (coll? form) (into (empty form) (map f form))
-            :else form)]
-    (if-let [m (meta form)]
-      (with-meta x m)
-      x)))
-
-(defn prewalk [f form]
-  (walk (partial prewalk f) (f form)))
-
 ;; Copied from Clojure 1.6.0, Copyright (c) Rich Hickey
 (defmacro ^:private cond->*
   "Takes an expression and a set of test/form pairs. Threads expr (via ->)

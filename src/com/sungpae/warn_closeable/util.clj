@@ -3,8 +3,9 @@
   (:require [clojure.java.io :as io]
             [clojure.reflect :refer [type-reflect]]
             [clojure.string :as string]
+            [clojure.tools.namespace.file :refer [read-file-ns-decl]]
             [clojure.tools.namespace.find :refer [find-namespaces]])
-  (:import (clojure.lang IMapEntry IRecord LineNumberingPushbackReader)
+  (:import (clojure.lang LineNumberingPushbackReader)
            (java.io File PrintWriter StringWriter)
            (java.net URL URLClassLoader URLDecoder)))
 
@@ -57,6 +58,10 @@
   (for [^URL url (.getURLs ^URLClassLoader (ClassLoader/getSystemClassLoader))]
     (URLDecoder/decode (.getPath url) "UTF-8")))
 
+(defn- clj? [^File f]
+  (and (.isFile f)
+       (.endsWith (.getPath f) ".clj")))
+
 (defn project-namespace-symbols
   "Extract a sequence of ns symbols in *.clj files from a collection of
    paths, which may be a mix of files or directories, and may be any type
@@ -65,12 +70,12 @@
   ([]
    (project-namespace-symbols (classpath)))
   ([paths]
-   (->> paths
-        (map io/file)
-        (filter (fn [^File f]
-                  (or (.isDirectory f)
-                      (and (.isFile f) (.endsWith (.getPath f) ".clj")))))
-        find-namespaces)))
+   (mapcat
+     (fn [path]
+       (let [f (io/file path)]
+         (cond (.isDirectory f) (find-namespaces [f])
+               (clj? f) [(second (read-file-ns-decl f))])))
+     paths)))
 
 (defn ^LineNumberingPushbackReader namespace-reader
   "Return a reader on the resource corresponding to ns."
